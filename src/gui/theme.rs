@@ -218,6 +218,30 @@ pub fn paint_drawn_icon(painter: &Painter, rect: Rect, app_id: &str, accent: Col
                 painter.rect_filled(bar, CornerRadius::same((w / 2.0) as u8), color);
             }
         }
+        "iurefficient" => {
+            // Cuenta: silueta de persona con un anillo del color de acento.
+            let head = pos2(rect.center().x, base + s * 0.08);
+            painter.circle_filled(head, s * 0.085, white);
+            let body = Rect::from_center_size(
+                pos2(rect.center().x, base + s * 0.29),
+                vec2(s * 0.36, s * 0.17),
+            );
+            painter.rect_filled(
+                body,
+                CornerRadius {
+                    nw: (s * 0.12) as u8,
+                    ne: (s * 0.12) as u8,
+                    sw: 2,
+                    se: 2,
+                },
+                white,
+            );
+            painter.circle_stroke(
+                pos2(rect.center().x, base + s * 0.17),
+                s * 0.27,
+                Stroke::new(s * 0.035, accent),
+            );
+        }
         _ => {
             // Diagrama de Gantt: tres barras escalonadas.
             let rows = [(0.18, 0.40), (0.34, 0.36), (0.52, 0.30)];

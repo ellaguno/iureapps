@@ -4,6 +4,7 @@ mod theme;
 mod view;
 
 use crate::catalog::{AppDef, APPS};
+use crate::connect;
 use crate::github::{self, Release};
 use crate::installer::{self, Installed};
 use crate::plan::{self, Status};
@@ -23,6 +24,40 @@ enum Msg {
     Progress(usize, f32),
     Log(String),
     Done(usize, Result<Option<Managed>, String>),
+    AccountLoaded(Option<connect::Saved>),
+    AccountVerified(Result<String, String>),
+    LoginDone(Result<connect::LoginOutcome, String>),
+    LogoutDone(Result<(), String>),
+}
+
+/// Estado de la cuenta de Iurefficient compartida.
+#[derive(Default)]
+struct AccountState {
+    loaded: bool,
+    saved: Option<connect::Saved>,
+    /// Nombre devuelto por la instancia al comprobar la sesión.
+    name: Option<String>,
+    checking: bool,
+    /// La sesión guardada ya no vale.
+    expired: bool,
+    busy: bool,
+    error: Option<String>,
+    /// Nombre recién devuelto al iniciar sesión: no hace falta volver a comprobarla.
+    just_logged: Option<String>,
+}
+
+/// Formulario de inicio de sesión.
+#[derive(Default)]
+struct LoginForm {
+    domain: String,
+    email: String,
+    password: String,
+    totp_token: Option<String>,
+    code: String,
+    busy: bool,
+    error: Option<String>,
+    /// Ya se puso el cursor en el primer campo vacío.
+    focused: bool,
 }
 
 #[derive(Default)]
@@ -69,6 +104,9 @@ pub struct LauncherApp {
     search: String,
     icons: theme::Icons,
     last_checked: Option<Instant>,
+    account: AccountState,
+    login: Option<LoginForm>,
+    confirm_logout: bool,
 }
 
 pub fn run() -> Result<(), String> {
@@ -129,8 +167,12 @@ impl LauncherApp {
             search: String::new(),
             icons,
             last_checked: None,
+            account: AccountState::default(),
+            login: None,
+            confirm_logout: false,
         };
         app.spawn_system();
+        app.load_account();
         app.refresh_releases();
         app
     }
@@ -209,6 +251,44 @@ impl LauncherApp {
                 }
                 Msg::Progress(i, p) => self.rows[i].progress = Some(p),
                 Msg::Log(m) => self.log.push(m),
+                Msg::AccountLoaded(saved) => {
+                    let a = &mut self.account;
+                    a.loaded = true;
+                    a.expired = false;
+                    a.name = None;
+                    a.checking = false;
+                    a.saved = saved.clone();
+                    if let Some(name) = a.just_logged.take().filter(|_| saved.is_some()) {
+                        a.name = Some(name);
+                    } else if let Some(s) = saved.filter(|s| s.has_session) {
+                        a.checking = true;
+                        let (tx, ctx) = (self.tx.clone(), self.ctx.clone());
+                        std::thread::spawn(move || {
+                            Self::send(&tx, &ctx, Msg::AccountVerified(connect::verify(&s)));
+                        });
+                    }
+                }
+                Msg::AccountVerified(r) => {
+                    self.account.checking = false;
+                    match r {
+                        Ok(name) => self.account.name = Some(name),
+                        Err(e) => {
+                            self.log.push(format!("Iurefficient: {e}"));
+                            self.account.expired = true;
+                        }
+                    }
+                }
+                Msg::LoginDone(r) => self.login_done(r),
+                Msg::LogoutDone(r) => {
+                    self.account.busy = false;
+                    match r {
+                        Ok(()) => self
+                            .log
+                            .push("Iurefficient: sesión cerrada en este equipo".into()),
+                        Err(e) => self.account.error = Some(e),
+                    }
+                    self.load_account();
+                }
                 Msg::Done(i, result) => {
                     let row = &mut self.rows[i];
                     row.busy = None;
@@ -313,6 +393,77 @@ impl LauncherApp {
                 Err(e) => self.rows[i].error = Some(e),
             }
         }
+    }
+
+    fn load_account(&self) {
+        let (tx, ctx) = (self.tx.clone(), self.ctx.clone());
+        std::thread::spawn(move || Self::send(&tx, &ctx, Msg::AccountLoaded(connect::saved())));
+    }
+
+    fn open_login(&mut self) {
+        let mut f = LoginForm::default();
+        if let Some(s) = &self.account.saved {
+            f.domain = s.domain.clone();
+            f.email = s.email.clone();
+        }
+        self.login = Some(f);
+    }
+
+    fn submit_login(&mut self) {
+        let Some(f) = self.login.as_mut() else { return };
+        f.busy = true;
+        f.error = None;
+        let (domain, email, password) = (f.domain.clone(), f.email.clone(), f.password.clone());
+        let totp = f.totp_token.clone().map(|t| (t, f.code.clone()));
+        let (tx, ctx) = (self.tx.clone(), self.ctx.clone());
+        std::thread::spawn(move || {
+            let totp = totp.as_ref().map(|(t, c)| (t.as_str(), c.as_str()));
+            let r = connect::login(&domain, &email, &password, totp);
+            Self::send(&tx, &ctx, Msg::LoginDone(r));
+        });
+    }
+
+    fn login_done(&mut self, r: Result<connect::LoginOutcome, String>) {
+        let Some(f) = self.login.as_mut() else { return };
+        f.busy = false;
+        match r {
+            Ok(connect::LoginOutcome::TotpRequired { totp_token }) => {
+                f.totp_token = Some(totp_token);
+                f.code.clear();
+            }
+            Ok(connect::LoginOutcome::Ok {
+                name,
+                created_webdav,
+            }) => {
+                self.log
+                    .push(format!("Iurefficient: conectada como {name}"));
+                if created_webdav {
+                    self.log.push(
+                        "Iurefficient: se creó la contraseña de aplicación WebDAV de este equipo"
+                            .into(),
+                    );
+                }
+                self.login = None;
+                self.account.error = None;
+                self.account.just_logged = Some(name);
+                self.load_account();
+            }
+            Err(e) => {
+                // Un código TOTP erróneo obliga a empezar de nuevo.
+                f.totp_token = None;
+                f.error = Some(e);
+            }
+        }
+    }
+
+    fn logout(&mut self) {
+        let Some(saved) = self.account.saved.clone() else {
+            return;
+        };
+        self.account.busy = true;
+        self.confirm_logout = false;
+        let (tx, ctx) = (self.tx.clone(), self.ctx.clone());
+        std::thread::spawn(move || Self::send(&tx, &ctx, Msg::LogoutDone(connect::logout(&saved))));
     }
 
     fn status(&self, i: usize) -> Status {

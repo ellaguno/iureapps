@@ -21,6 +21,13 @@ Qué hace:
 - **Escoge la variante adecuada de IureTranscribe**: CUDA si hay NVIDIA con driver ≥ 525
   (en Linux sólo en `.deb`), Vulkan para AMD/Intel o NVIDIA sin CUDA, Metal en Apple
   Silicon y CPU en otro caso. Se puede cambiar a mano; muestra por qué recomienda cada una.
+- **Cuenta de Iurefficient para todas las apps** (mosaico «00»): se inicia sesión una vez
+  (con código de verificación si la cuenta lo pide) y el lanzador hace lo mismo que cada
+  app con [`iurefficient-connect`](https://github.com/ellaguno/iurefficient-connect): guarda
+  la sesión en el llavero del sistema, crea la contraseña de aplicación WebDAV de este
+  equipo si no hay ninguna y deja la cuenta como «cuenta activa». IureDav, IureTranscribe,
+  IureOCR e iureditor la toman al abrirse si no tienen otra configurada. «Abrir
+  Iurefficient» abre la instancia en el navegador.
 - **Verifica la firma minisign** (`.sig`) de cada instalador con la clave pública del
   actualizador de cada app antes de instalarlo.
 
@@ -45,6 +52,10 @@ iureapps instalar iuretranscribe --variante vulkan --formato appimage
 iureapps actualizar           # todas las instaladas
 iureapps abrir iureditor
 iureapps desinstalar iureocr
+iureapps conectar 2.ds.iurefficient.com yo@despacho.com   # pide contraseña (y código)
+iureapps cuenta               # estado de la cuenta compartida
+iureapps iurefficient         # abre la instancia en el navegador
+iureapps desconectar
 ```
 
 IureVoz e IureProject están en repos privados: configura un token de GitHub de sólo lectura
@@ -58,12 +69,26 @@ Iconos y fuentes incluidos (Inter y JetBrains Mono, subconjunto latino): ver
 
 ## Compilar
 
+En Linux hace falta `libdbus-1-dev` (llavero por Secret Service, como en las apps).
+
 ```bash
 cargo build --release
 cargo test
 cargo test -- --ignored   # descarga real de iureditor, verifica la firma, instala y desinstala
 IUREAPPS_WINDOW_SIZE=1280x900 cargo run   # tamaño inicial de la ventana (capturas)
 ```
+
+Cuenta compartida contra un doble de la API (usuario `ana@despacho.com`, contraseña
+`secreta`, código `123456` con `--totp`):
+
+```bash
+python3 tests/api-falsa.py 8099 --totp &
+iureapps conectar http://127.0.0.1:8099 ana@despacho.com
+```
+
+El conector guarda la instancia sin esquema y la vuelve a abrir por `https`, así que con este
+doble (`http`) la sesión aparece como caducada al reabrir el lanzador; con una instancia real
+no pasa.
 
 Al subir una etiqueta `vX.Y.Z`, el workflow `build.yml` publica los binarios para Linux x64,
 Windows x64 y macOS (arm64 y x64). El lanzador avisa cuando hay una versión suya más nueva.
@@ -79,8 +104,8 @@ hace falta nada más.
 
 - **Fase 2 (resto)**: miniaturas o capturas de cada app (`docs/media` de cada repo) en una
   vista de detalle, e icono propio para IureVoz e IureProject (hoy se dibujan en código).
-- Cuenta de Iurefficient compartida: mostrar la sesión que guardan las apps en el llavero del
-  sistema (`iurefficient-connect`) e iniciar sesión una vez para todas.
+- Cuenta: elegir entre varias cuentas o instancias, y ver o revocar las contraseñas WebDAV y
+  los tokens MCP del equipo.
 - Autoactualización del lanzador (hoy sólo avisa y enlaza la descarga).
 - Comprobar requisitos por app: Tesseract/idiomas de IureOCR, rclone/WinFsp/macFUSE de
   IureDav, GNOME en Wayland de IureVoz.

@@ -3,6 +3,7 @@
 
 mod catalog;
 mod cli;
+mod connect;
 mod github;
 mod gui;
 mod installer;
@@ -13,6 +14,7 @@ mod util;
 mod verify;
 
 fn main() {
+    connect::init();
     let args: Vec<String> = std::env::args().skip(1).collect();
     if !args.is_empty() {
         attach_console();

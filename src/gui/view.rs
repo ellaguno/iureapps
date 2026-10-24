@@ -342,16 +342,28 @@ impl LauncherApp {
         ui.add_space(10.0);
     }
 
-    fn sections(&self) -> Vec<(&'static str, Vec<usize>)> {
+    /// Mosaicos por sección; `None` es el de la cuenta de Iurefficient.
+    fn sections(&self) -> Vec<(&'static str, Vec<Option<usize>>)> {
         let pick = |exp: bool| {
             (0..APPS.len())
                 .filter(|&i| APPS[i].experimental == exp && self.matches(i))
-                .collect()
+                .map(Some)
+                .collect::<Vec<_>>()
         };
-        vec![
-            ("Apps de la suite", pick(false)),
-            ("En exploración", pick(true)),
-        ]
+        let mut suite = pick(false);
+        if self.account_matches() {
+            suite.insert(0, None);
+        }
+        vec![("Apps de la suite", suite), ("En exploración", pick(true))]
+    }
+
+    fn account_matches(&self) -> bool {
+        let q = self.search.trim().to_lowercase();
+        self.filter == Filter::All
+            && (q.is_empty()
+                || ["iurefficient", "cuenta", "instancia", "sesión"]
+                    .iter()
+                    .any(|t| t.contains(&q)))
     }
 
     fn grid(&mut self, ui: &mut Ui, sys: &SystemInfo) {
@@ -361,15 +373,19 @@ impl LauncherApp {
                 continue;
             }
             n += 1;
-            Self::section_title(ui, n, title, items.len());
+            let apps = items.iter().filter(|i| i.is_some()).count();
+            Self::section_title(ui, n, title, apps);
             let width = ui.available_width();
             let cols = ((width / TILE_MIN_W).floor() as usize).clamp(1, 4);
             let tile_w = (width / cols as f32).floor();
             for row in items.chunks(cols) {
                 ui.horizontal(|ui| {
                     ui.spacing_mut().item_spacing = vec2(0.0, 0.0);
-                    for &i in row {
-                        self.tile(ui, i, sys, tile_w);
+                    for item in row {
+                        match item {
+                            Some(i) => self.tile(ui, *i, sys, tile_w),
+                            None => self.account_tile(ui, tile_w),
+                        }
                     }
                 });
             }
@@ -379,6 +395,353 @@ impl LauncherApp {
             ui.vertical_centered(|ui| {
                 ui.label(RichText::new("Ninguna app coincide con el filtro.").color(MUTED));
             });
+        }
+    }
+
+    /// Estado de la cuenta: (color, etiqueta).
+    fn account_status(&self) -> (Color32, &'static str) {
+        let a = &self.account;
+        match &a.saved {
+            _ if !a.loaded => (MUTED, "Consultando…"),
+            Some(_) if a.busy => (MUTED, "Cerrando sesión…"),
+            Some(_) if a.checking => (MUTED, "Comprobando sesión…"),
+            Some(s) if s.has_session && !a.expired => (OK, "Conectada"),
+            Some(_) => (WARN, "Sesión caducada"),
+            None => (INFO, "Sin conectar"),
+        }
+    }
+
+    fn account_connected(&self) -> bool {
+        self.account.saved.as_ref().is_some_and(|s| s.has_session) && !self.account.expired
+    }
+
+    /// Mosaico de la cuenta de Iurefficient: conectar una vez para todas las apps y abrir
+    /// la instancia en el navegador.
+    fn account_tile(&mut self, ui: &mut Ui, w: f32) {
+        let accent = INFO;
+        let (rect, resp) = ui.allocate_exact_size(vec2(w, TILE_H), Sense::hover());
+        let painter = ui.painter_at(rect.expand(1.0));
+        painter.rect(
+            rect,
+            CornerRadius::ZERO,
+            Color32::from_rgb(15, 21, 34),
+            Stroke::new(1.0, LINE),
+            StrokeKind::Inside,
+        );
+        if resp.hovered() || ui.rect_contains_pointer(rect) {
+            painter.rect_filled(
+                Rect::from_min_size(rect.min, vec2(rect.width(), 2.0)),
+                0.0,
+                accent,
+            );
+        }
+        let strip = Rect::from_min_size(rect.min, vec2(w, 40.0));
+        painter.hline(strip.x_range(), strip.bottom(), Stroke::new(1.0, LINE));
+        let badge = Rect::from_min_size(strip.min + vec2(PAD, 10.0), vec2(30.0, 20.0));
+        painter.rect_filled(badge, 0.0, BRAND);
+        painter.text(
+            badge.center(),
+            Align2::CENTER_CENTER,
+            "00",
+            theme::mono(11.0),
+            Color32::WHITE,
+        );
+
+        let connected = self.account_connected();
+        let saved = self.account.saved.clone();
+        let mut ui = ui.new_child(
+            UiBuilder::new()
+                .max_rect(rect)
+                .layout(Layout::top_down(Align::Min)),
+        );
+        ui.scope_builder(
+            UiBuilder::new()
+                .max_rect(Rect::from_min_max(
+                    pos2(badge.right() + 8.0, strip.top()),
+                    pos2(rect.right() - PAD, strip.bottom()),
+                ))
+                .layout(Layout::right_to_left(Align::Center)),
+            |ui| {
+                let gh = "https://github.com/ellaguno/iurefficient-connect";
+                if ui
+                    .add(egui::Label::new(caps("Conector ↗", 10.5, MUTED)).sense(Sense::click()))
+                    .on_hover_text(gh)
+                    .clicked()
+                {
+                    ui.ctx().open_url(egui::OpenUrl::new_tab(gh));
+                }
+                if let Some(s) = &saved {
+                    ui.add_space(10.0);
+                    if ui
+                        .add(
+                            egui::Label::new(caps("Instancia ↗", 10.5, MUTED))
+                                .sense(Sense::click()),
+                        )
+                        .on_hover_text(&s.web_url)
+                        .clicked()
+                    {
+                        ui.ctx().open_url(egui::OpenUrl::new_tab(&s.web_url));
+                    }
+                }
+            },
+        );
+
+        let top = strip.bottom() + 20.0;
+        let icon = Rect::from_min_size(pos2(rect.left() + PAD, top), vec2(60.0, 60.0));
+        theme::paint_drawn_icon(&painter, icon, "iurefficient", accent);
+        let (tagline, hint) = match (&saved, connected) {
+            (Some(s), true) => (
+                format!(
+                    "Conectada como {}",
+                    self.account.name.clone().unwrap_or_else(|| s.email.clone())
+                ),
+                format!("{} · {}", s.email, s.domain),
+            ),
+            (Some(s), false) => (
+                "Vuelve a iniciar sesión".to_string(),
+                format!("{} · {}", s.email, s.domain),
+            ),
+            (None, _) => (
+                "Tu cuenta, para todas las apps".to_string(),
+                "Inicia sesión una vez desde aquí".to_string(),
+            ),
+        };
+        ui.scope_builder(
+            UiBuilder::new()
+                .max_rect(Rect::from_min_max(
+                    pos2(icon.right() + 14.0, top - 4.0),
+                    pos2(rect.right() - PAD, top + 70.0),
+                ))
+                .layout(Layout::top_down(Align::Min)),
+            |ui| {
+                ui.spacing_mut().item_spacing.y = 2.0;
+                ui.label(two_tone("Iurefficient", 25.0, accent));
+                ui.add(egui::Label::new(RichText::new(tagline).size(14.5).color(TEXT)).truncate());
+                ui.add(egui::Label::new(RichText::new(hint).size(12.5).color(FAINT)).truncate());
+            },
+        );
+
+        ui.scope_builder(
+            UiBuilder::new()
+                .max_rect(Rect::from_min_max(
+                    pos2(rect.left() + PAD, top + 84.0),
+                    pos2(rect.right() - PAD, rect.bottom() - 56.0),
+                ))
+                .layout(Layout::top_down(Align::Min)),
+            |ui| {
+                ui.spacing_mut().item_spacing.y = 8.0;
+                let (color, text) = self.account_status();
+                chip(ui, text, color);
+                let line = match &saved {
+                    Some(s) if connected => {
+                        let dav = if s.has_webdav {
+                            "Sesión y WebDAV guardadas"
+                        } else {
+                            "Sesión guardada · sin WebDAV"
+                        };
+                        dav.to_string()
+                    }
+                    Some(s) if !s.app.is_empty() => format!("Cuenta configurada por {}", s.app),
+                    _ => "IureDav, IureTranscribe, IureOCR e iureditor".to_string(),
+                };
+                ui.add(egui::Label::new(RichText::new(line).size(13.0).color(MUTED)).truncate());
+                let note = match &self.account.error {
+                    Some(e) => RichText::new(e).size(12.0).color(ERROR),
+                    None => RichText::new("Las apps sin cuenta propia la toman al abrirse")
+                        .size(12.0)
+                        .color(FAINT),
+                };
+                ui.add(egui::Label::new(note).truncate());
+            },
+        );
+
+        let bar = Rect::from_min_max(
+            pos2(rect.left() + PAD, rect.bottom() - 54.0),
+            pos2(rect.right() - PAD, rect.bottom() - 18.0),
+        );
+        ui.scope_builder(
+            UiBuilder::new()
+                .max_rect(bar)
+                .layout(Layout::left_to_right(Align::Center)),
+            |ui| {
+                self.account_actions(ui, bar.width());
+            },
+        );
+    }
+
+    fn account_actions(&mut self, ui: &mut Ui, width: f32) {
+        let size = vec2(width - 44.0, 36.0);
+        let busy = !self.account.loaded || self.account.busy || self.account.checking;
+        let saved = self.account.saved.clone();
+        if self.account_connected() {
+            if let Some(s) = &saved {
+                if flat_button(ui, "Abrir Iurefficient", Some(TEXT), size)
+                    .on_hover_text(&s.web_url)
+                    .clicked()
+                {
+                    ui.ctx().open_url(egui::OpenUrl::new_tab(&s.web_url));
+                }
+            }
+        } else {
+            let label = if saved.is_some() {
+                "Volver a conectar"
+            } else {
+                "Conectar"
+            };
+            let r = ui
+                .add_enabled_ui(!busy, |ui| flat_button(ui, label, Some(TEXT), size))
+                .inner;
+            if r.clicked() {
+                self.open_login();
+            }
+        }
+        ui.add_space(8.0);
+        ui.scope(|ui| {
+            ui.spacing_mut().button_padding = vec2(0.0, 0.0);
+            let menu = egui::Button::new(RichText::new("···").size(15.0).color(TEXT))
+                .fill(Color32::TRANSPARENT)
+                .stroke(Stroke::new(1.0, LINE))
+                .min_size(vec2(36.0, 36.0));
+            egui::containers::menu::MenuButton::from_button(menu).ui(ui, |ui| {
+                ui.set_min_width(210.0);
+                if let Some(s) = &saved {
+                    if ui.button("Abrir la instancia en el navegador").clicked() {
+                        ui.ctx().open_url(egui::OpenUrl::new_tab(&s.web_url));
+                    }
+                }
+                if ui
+                    .button(if saved.is_some() {
+                        "Cambiar de cuenta…"
+                    } else {
+                        "Conectar…"
+                    })
+                    .clicked()
+                {
+                    self.open_login();
+                }
+                if saved.is_some() && !busy {
+                    ui.separator();
+                    if ui
+                        .button(RichText::new("Cerrar sesión…").color(ERROR))
+                        .clicked()
+                    {
+                        self.confirm_logout = true;
+                    }
+                }
+            });
+        });
+    }
+
+    fn login_modal(&mut self, ctx: &egui::Context) {
+        if self.login.is_none() {
+            return;
+        }
+        let mut submit = false;
+        let mut cancel = false;
+        let resp = egui::Modal::new(egui::Id::unique("iureapps-login")).show(ctx, |ui| {
+            let Some(f) = self.login.as_mut() else { return };
+            ui.set_width(380.0);
+            ui.label(RichText::new("Conectar con Iurefficient").font(theme::bold_font(18.0)));
+            ui.add_space(4.0);
+            ui.label(
+                RichText::new("La sesión se guarda en el llavero del sistema y la comparten IureDav, IureTranscribe, IureOCR e iureditor.")
+                    .size(12.5)
+                    .color(MUTED),
+            );
+            ui.add_space(12.0);
+            let field = |ui: &mut Ui, label: &str, value: &mut String, hint: &str, password: bool, enabled: bool| {
+                caps_label(ui, label, 10.0, FAINT);
+                let r = ui.add_enabled(
+                    enabled,
+                    egui::TextEdit::singleline(value)
+                        .hint_text(hint)
+                        .password(password)
+                        .desired_width(f32::INFINITY)
+                        .margin(egui::Margin::symmetric(8, 7)),
+                );
+                ui.add_space(6.0);
+                r
+            };
+            let editing = !f.busy && f.totp_token.is_none();
+            let d = field(ui, "Instancia", &mut f.domain, "2.ds.iurefficient.com", false, editing);
+            let e = field(ui, "Correo", &mut f.email, "tu@despacho.com", false, editing);
+            let pw = field(ui, "Contraseña", &mut f.password, "", true, editing);
+            if !f.focused {
+                f.focused = true;
+                if f.domain.is_empty() {
+                    d.request_focus();
+                } else if f.email.is_empty() {
+                    e.request_focus();
+                } else {
+                    pw.request_focus();
+                }
+            }
+            if pw.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+                submit = true;
+            }
+            if f.totp_token.is_some() {
+                let code = field(ui, "Código de verificación", &mut f.code, "123456", false, !f.busy);
+                if code.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+                    submit = true;
+                }
+                if !f.busy && !code.has_focus() && f.code.is_empty() {
+                    code.request_focus();
+                }
+            }
+            if let Some(e) = &f.error {
+                ui.label(RichText::new(e).size(12.5).color(ERROR));
+                ui.add_space(6.0);
+            }
+            ui.add_space(6.0);
+            ui.horizontal(|ui| {
+                let ready = !f.busy
+                    && !f.domain.trim().is_empty()
+                    && !f.email.trim().is_empty()
+                    && (!f.password.is_empty() || f.totp_token.is_some());
+                let label = if f.totp_token.is_some() { "Verificar" } else { "Conectar" };
+                if ui.add_enabled_ui(ready, |ui| flat_button(ui, label, Some(TEXT), vec2(130.0, 32.0))).inner.clicked() {
+                    submit = true;
+                }
+                if flat_button(ui, "Cancelar", None, vec2(100.0, 32.0)).clicked() {
+                    cancel = true;
+                }
+                if f.busy {
+                    ui.spinner();
+                }
+            });
+        });
+        if submit {
+            self.submit_login();
+        }
+        if cancel || (resp.should_close() && !self.login.as_ref().is_some_and(|f| f.busy)) {
+            self.login = None;
+        }
+    }
+
+    fn logout_modal(&mut self, ctx: &egui::Context) {
+        if !self.confirm_logout {
+            return;
+        }
+        let resp = egui::Modal::new(egui::Id::unique("iureapps-logout")).show(ctx, |ui| {
+            ui.set_width(380.0);
+            ui.label(RichText::new("¿Cerrar la sesión de Iurefficient?").font(theme::bold_font(18.0)));
+            ui.add_space(6.0);
+            ui.label(
+                RichText::new("Se cierra en la instancia y en este equipo. Las apps abiertas siguen conectadas hasta que las cierres; la contraseña WebDAV se conserva.")
+                    .color(MUTED),
+            );
+            ui.add_space(14.0);
+            ui.horizontal(|ui| {
+                if flat_button(ui, "Cerrar sesión", Some(ERROR), vec2(140.0, 32.0)).clicked() {
+                    self.logout();
+                }
+                if flat_button(ui, "Cancelar", None, vec2(100.0, 32.0)).clicked() {
+                    self.confirm_logout = false;
+                }
+            });
+        });
+        if resp.should_close() {
+            self.confirm_logout = false;
         }
     }
 
@@ -781,6 +1144,43 @@ impl LauncherApp {
                             caps_label(ui, h, 10.0, FAINT);
                         }
                         ui.end_row();
+                        if self.account_matches() {
+                            let (r, _) = ui.allocate_exact_size(vec2(32.0, 32.0), Sense::hover());
+                            theme::paint_drawn_icon(ui.painter(), r, "iurefficient", INFO);
+                            ui.vertical(|ui| {
+                                ui.set_min_width(230.0);
+                                ui.spacing_mut().item_spacing.y = 0.0;
+                                ui.add(
+                                    egui::Label::new(two_tone("Iurefficient", 15.0, INFO)).extend(),
+                                );
+                                ui.add(
+                                    egui::Label::new(
+                                        RichText::new("Cuenta para todas las apps")
+                                            .size(12.0)
+                                            .color(FAINT),
+                                    )
+                                    .extend(),
+                                );
+                            });
+                            let (c, t) = self.account_status();
+                            ui.label(caps(t, 10.0, c));
+                            let who = self
+                                .account
+                                .saved
+                                .as_ref()
+                                .map(|s| s.email.clone())
+                                .unwrap_or_else(|| "—".into());
+                            ui.label(RichText::new(who).color(MUTED));
+                            let dom = self
+                                .account
+                                .saved
+                                .as_ref()
+                                .map(|s| s.domain.clone())
+                                .unwrap_or_else(|| "—".into());
+                            ui.label(RichText::new(dom).color(MUTED));
+                            ui.horizontal(|ui| self.account_actions(ui, 190.0));
+                            ui.end_row();
+                        }
                         for i in items {
                             let app = &APPS[i];
                             let accent = theme::accent(app.accent);
@@ -1074,5 +1474,7 @@ impl eframe::App for LauncherApp {
             self.log_window(&ctx);
         }
         self.uninstall_modal(&ctx);
+        self.login_modal(&ctx);
+        self.logout_modal(&ctx);
     }
 }

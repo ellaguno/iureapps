@@ -40,6 +40,9 @@ jobs:
           targets: ${{ matrix.target }}
           components: clippy, rustfmt
       - uses: swatinem/rust-cache@v2
+      - name: Dependencias de Linux (llavero por D-Bus)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libdbus-1-dev pkg-config
       - name: Formato y clippy
         if: matrix.name == 'linux-x64'
         run: |

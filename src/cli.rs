@@ -3,7 +3,7 @@
 use crate::catalog::{self, Format, Variant, APPS};
 use crate::state::State;
 use crate::system::SystemInfo;
-use crate::{github, installer, plan};
+use crate::{connect, github, installer, plan};
 
 const HELP: &str = "iureapps — lanzador de las apps de Iurefficient
 
@@ -15,6 +15,10 @@ Uso:
   iureapps actualizar [<app>]      actualiza una app o todas las instaladas
   iureapps abrir <app>
   iureapps desinstalar <app>
+  iureapps cuenta                  cuenta de Iurefficient compartida por las apps
+  iureapps conectar <instancia> <correo>   inicia sesión (pide la contraseña)
+  iureapps desconectar             cierra la sesión en este equipo
+  iureapps iurefficient            abre la instancia en el navegador
 
 Token para repos privados: variable IUREAPPS_GITHUB_TOKEN (o GITHUB_TOKEN).";
 
@@ -38,6 +42,10 @@ pub fn run(args: &[String]) -> i32 {
         "actualizar" | "update" => install(&args[1..], true),
         "abrir" | "run" | "open" => open(&args[1..]),
         "desinstalar" | "uninstall" => uninstall(&args[1..]),
+        "cuenta" | "account" => account(),
+        "conectar" | "login" => login(&args[1..]),
+        "desconectar" | "logout" => logout(),
+        "iurefficient" | "web" => open_web(),
         other => Err(format!("orden desconocida: {other}\n\n{HELP}")),
     };
     match result {
@@ -235,4 +243,96 @@ fn uninstall(args: &[String]) -> Result<(), String> {
     state.save();
     println!("{} desinstalada", app.name);
     Ok(())
+}
+
+fn account() -> Result<(), String> {
+    let Some(s) = connect::saved() else {
+        println!("Sin cuenta de Iurefficient en este equipo (usa `iureapps conectar`).");
+        return Ok(());
+    };
+    println!("Instancia: {}", s.web_url);
+    println!("Correo:    {}", s.email);
+    if !s.app.is_empty() {
+        println!("La dejó:   {}", s.app);
+    }
+    println!(
+        "WebDAV:    {}",
+        if s.has_webdav {
+            "contraseña guardada"
+        } else {
+            "sin contraseña"
+        }
+    );
+    if !s.has_session {
+        println!("Sesión:    no hay (vuelve a conectar)");
+        return Ok(());
+    }
+    match connect::verify(&s) {
+        Ok(name) => println!("Sesión:    válida, {name}"),
+        Err(e) => println!("Sesión:    caducada ({e})"),
+    }
+    Ok(())
+}
+
+fn read_line(prompt: &str) -> Result<String, String> {
+    use std::io::Write;
+    print!("{prompt}");
+    let _ = std::io::stdout().flush();
+    let mut line = String::new();
+    std::io::stdin()
+        .read_line(&mut line)
+        .map_err(|e| e.to_string())?;
+    Ok(line.trim_end_matches(['\r', '\n']).to_string())
+}
+
+fn login(args: &[String]) -> Result<(), String> {
+    let (Some(domain), Some(email)) = (args.first(), args.get(1)) else {
+        return Err("uso: iureapps conectar <instancia> <correo>".into());
+    };
+    let password = match std::env::var("IUREAPPS_PASSWORD") {
+        Ok(p) => p,
+        Err(_) => read_line("Contraseña (se verá al escribir): ")?,
+    };
+    let outcome = match connect::login(domain, email, &password, None)? {
+        connect::LoginOutcome::TotpRequired { totp_token } => {
+            let code = read_line("Código de verificación: ")?;
+            connect::login(domain, email, &password, Some((&totp_token, &code)))?
+        }
+        ok => ok,
+    };
+    if let connect::LoginOutcome::Ok {
+        name,
+        created_webdav,
+    } = outcome
+    {
+        println!("Conectada como {name}.");
+        if created_webdav {
+            println!("Se creó la contraseña de aplicación WebDAV de este equipo.");
+        }
+        println!("Las apps sin cuenta configurada la usarán al abrirse.");
+    }
+    Ok(())
+}
+
+fn logout() -> Result<(), String> {
+    let s = connect::saved().ok_or("no hay cuenta conectada")?;
+    connect::logout(&s)?;
+    println!("Sesión cerrada en este equipo.");
+    Ok(())
+}
+
+fn open_web() -> Result<(), String> {
+    let s = connect::saved().ok_or("no hay cuenta conectada (usa `iureapps conectar`)")?;
+    let opener = if cfg!(windows) {
+        "explorer"
+    } else if cfg!(target_os = "macos") {
+        "open"
+    } else {
+        "xdg-open"
+    };
+    crate::util::command(opener)
+        .arg(&s.web_url)
+        .spawn()
+        .map(|_| ())
+        .map_err(|e| format!("no se pudo abrir el navegador: {e}"))
 }
