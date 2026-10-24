@@ -110,9 +110,15 @@ pub struct LauncherApp {
 }
 
 pub fn run() -> Result<(), String> {
+    let mut viewport = egui::ViewportBuilder::default();
+    if let Some(icon) = theme::window_icon() {
+        viewport = viewport.with_icon(icon);
+    }
     let options = eframe::NativeOptions {
-        viewport: egui::ViewportBuilder::default()
+        viewport: viewport
             .with_title("Iurefficient Apps")
+            // Igual que el .desktop, para que el escritorio asocie la ventana con su icono.
+            .with_app_id("iureapps")
             .with_inner_size(window_size())
             .with_min_inner_size([480.0, 480.0]),
         ..Default::default()

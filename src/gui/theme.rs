@@ -163,6 +163,20 @@ impl Icons {
     }
 }
 
+/// Icono de la ventana (el mismo que instalan los paquetes .deb y .rpm).
+pub fn window_icon() -> Option<egui::IconData> {
+    let img = decode_png(include_bytes!("../../assets/iureapps.png"))?;
+    Some(egui::IconData {
+        rgba: img
+            .pixels
+            .iter()
+            .flat_map(|c| c.to_srgba_unmultiplied())
+            .collect(),
+        width: img.size[0] as u32,
+        height: img.size[1] as u32,
+    })
+}
+
 fn decode_png(bytes: &[u8]) -> Option<egui::ColorImage> {
     let mut decoder = png::Decoder::new(std::io::Cursor::new(bytes));
     decoder.set_transformations(png::Transformations::normalize_to_color8());

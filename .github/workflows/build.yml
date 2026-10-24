@@ -70,6 +70,20 @@ jobs:
             tar -czf "dist/iureapps-${{ matrix.name }}.tar.gz" -C "$(dirname "$bin")" iureapps
           fi
           ls -la dist
+      - name: Herramientas de empaquetado (Linux)
+        if: runner.os == 'Linux'
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-deb,cargo-generate-rpm
+      - name: Paquetes .deb y .rpm
+        if: runner.os == 'Linux'
+        run: |
+          # La metadata de Cargo.toml apunta a target/release/iureapps.
+          mkdir -p target/release
+          cp "target/${{ matrix.target }}/release/iureapps" target/release/iureapps
+          cargo deb --no-build --no-strip --output dist/
+          cargo generate-rpm --output dist/
+          ls -la dist
       - uses: actions/upload-artifact@v4
         with:
           name: iureapps-${{ matrix.name }}

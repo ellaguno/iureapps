@@ -91,9 +91,19 @@ doble (`http`) la sesión aparece como caducada al reabrir el lanzador; con una 
 no pasa.
 
 Al subir una etiqueta `vX.Y.Z`, o al lanzar `build.yml` a mano con la entrada `release`
-(`vX.Y.Z`), el workflow publica la release con `iureapps-windows-x64.exe` y
-`iureapps-{linux-x64,macos-arm64,macos-x64}.tar.gz`. En macOS el binario no está firmado:
-la primera vez, clic derecho → Abrir (o `xattr -d com.apple.quarantine iureapps`). El lanzador avisa cuando hay una versión suya más nueva.
+(`vX.Y.Z`), el workflow publica la release con:
+
+| Archivo | Para |
+| --- | --- |
+| `iureapps_X.Y.Z-1_amd64.deb` | Debian, Ubuntu y derivadas (`sudo apt install ./iureapps_…deb`) |
+| `iureapps-X.Y.Z-1.x86_64.rpm` | Fedora, openSUSE y derivadas (`sudo dnf install ./iureapps-…rpm`) |
+| `iureapps-linux-x64.tar.gz` | cualquier Linux x64 (binario suelto) |
+| `iureapps-windows-x64.exe` | Windows |
+| `iureapps-macos-arm64.tar.gz`, `iureapps-macos-x64.tar.gz` | macOS (Apple Silicon e Intel) |
+
+Los paquetes instalan el binario en `/usr/bin`, la entrada del menú y el icono. En macOS el
+binario no está firmado: la primera vez, clic derecho → Abrir (o
+`xattr -d com.apple.quarantine iureapps`). El icono se regenera con `python3 scripts/icono.py`. El lanzador avisa cuando hay una versión suya más nueva.
 
 ## Agregar una app
 
