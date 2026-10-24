@@ -4,6 +4,10 @@ Lanzador e instalador ligero, en Rust, de las apps de escritorio de
 [Iurefficient](https://iurefficient.com): **iureditor, IureTranscribe, IureOCR, IureDav,
 IureVoz e IureProject**. Un solo ejecutable (~7 MB) para Linux, Windows y macOS.
 
+La ventana muestra las apps en **mosaico** (o en tabla): icono, nombre con el color de cada
+app, estado, versión, aceleración elegida y la acción principal (instalar, actualizar o
+abrir), con filtros (todas, instaladas, actualizaciones, no instaladas) y búsqueda.
+
 Qué hace:
 
 - **Sabe qué está instalado** y en qué versión: AppImage/.app que instaló él mismo, y
@@ -47,12 +51,18 @@ IureVoz e IureProject están en repos privados: configura un token de GitHub de 
 en *Ajustes* o con la variable `IUREAPPS_GITHUB_TOKEN`. El token también sube el límite de la
 API de 60 a 5000 consultas por hora.
 
+## Recursos
+
+Iconos y fuentes incluidos (Inter y JetBrains Mono, subconjunto latino): ver
+[`assets/ATTRIBUTION.md`](assets/ATTRIBUTION.md).
+
 ## Compilar
 
 ```bash
 cargo build --release
 cargo test
 cargo test -- --ignored   # descarga real de iureditor, verifica la firma, instala y desinstala
+IUREAPPS_WINDOW_SIZE=1280x900 cargo run   # tamaño inicial de la ventana (capturas)
 ```
 
 Al subir una etiqueta `vX.Y.Z`, el workflow `build.yml` publica los binarios para Linux x64,
@@ -67,9 +77,8 @@ hace falta nada más.
 
 ## Siguientes fases
 
-- **Fase 2, interfaz en mosaico**: tarjetas con el icono de cada app y miniaturas o capturas
-  (`docs/media` de cada repo), filtros (todas / instaladas / con actualización), búsqueda y
-  un estilo propio de la suite. Que se vea bien, sin perder ligereza.
+- **Fase 2 (resto)**: miniaturas o capturas de cada app (`docs/media` de cada repo) en una
+  vista de detalle, e icono propio para IureVoz e IureProject (hoy se dibujan en código).
 - Cuenta de Iurefficient compartida: mostrar la sesión que guardan las apps en el llavero del
   sistema (`iurefficient-connect`) e iniciar sesión una vez para todas.
 - Autoactualización del lanzador (hoy sólo avisa y enlaza la descarga).

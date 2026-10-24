@@ -1165,6 +1165,7 @@ dependencies = [
  "base64 0.22.1",
  "eframe",
  "minisign-verify",
+ "png",
  "serde",
  "serde_json",
  "ureq",

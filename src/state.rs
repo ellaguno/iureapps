@@ -28,6 +28,9 @@ pub struct State {
     pub prefs: BTreeMap<String, Pref>,
     #[serde(default)]
     pub github_token: Option<String>,
+    /// Vista de la ventana: mosaico (por defecto) o tabla.
+    #[serde(default)]
+    pub table_view: bool,
 }
 
 fn path() -> PathBuf {
