@@ -90,8 +90,10 @@ El conector guarda la instancia sin esquema y la vuelve a abrir por `https`, as�
 doble (`http`) la sesión aparece como caducada al reabrir el lanzador; con una instancia real
 no pasa.
 
-Al subir una etiqueta `vX.Y.Z`, el workflow `build.yml` publica los binarios para Linux x64,
-Windows x64 y macOS (arm64 y x64). El lanzador avisa cuando hay una versión suya más nueva.
+Al subir una etiqueta `vX.Y.Z`, o al lanzar `build.yml` a mano con la entrada `release`
+(`vX.Y.Z`), el workflow publica la release con `iureapps-windows-x64.exe` y
+`iureapps-{linux-x64,macos-arm64,macos-x64}.tar.gz`. En macOS el binario no está firmado:
+la primera vez, clic derecho → Abrir (o `xattr -d com.apple.quarantine iureapps`). El lanzador avisa cuando hay una versión suya más nueva.
 
 ## Agregar una app
 

@@ -6,6 +6,11 @@ on:
     tags: ["v*"]
   pull_request:
   workflow_dispatch:
+    inputs:
+      release:
+        description: "Versión a publicar (p. ej. v0.1.0); vacío = sólo compilar"
+        required: false
+        default: ""
 
 permissions:
   contents: write
@@ -57,18 +62,37 @@ jobs:
         shell: bash
         run: |
           mkdir -p dist
-          ext=""; [[ "${{ matrix.bin }}" == *.exe ]] && ext=".exe"
-          cp "target/${{ matrix.target }}/release/${{ matrix.bin }}" "dist/iureapps-${{ matrix.name }}${ext}"
+          bin="target/${{ matrix.target }}/release/${{ matrix.bin }}"
+          if [[ "${{ matrix.bin }}" == *.exe ]]; then
+            cp "$bin" "dist/iureapps-${{ matrix.name }}.exe"
+          else
+            # tar.gz conserva el permiso de ejecución (los artefactos lo pierden).
+            tar -czf "dist/iureapps-${{ matrix.name }}.tar.gz" -C "$(dirname "$bin")" iureapps
+          fi
           ls -la dist
       - uses: actions/upload-artifact@v4
         with:
           name: iureapps-${{ matrix.name }}
           path: dist/*
-      - name: Publicar en la release
-        if: startsWith(github.ref, 'refs/tags/v')
-        shell: bash
+
+  # Release: al subir una etiqueta v* o al lanzar el workflow a mano con `release`.
+  # GitHub crea la etiqueta sobre el commit compilado si todavía no existe.
+  publish:
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v') || inputs.release != ''
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Publicar
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ inputs.release != '' && inputs.release || github.ref_name }}
         run: |
-          gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1 || gh release create "$GITHUB_REF_NAME" --title "Iurefficient Apps $GITHUB_REF_NAME" --generate-notes || true
-          gh release upload "$GITHUB_REF_NAME" dist/* --clobber
+          ls -la dist
+          gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1 || \
+            gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" \
+              --title "Iurefficient Apps ${TAG#v}" --generate-notes
+          gh release upload "$TAG" dist/* --repo "$GITHUB_REPOSITORY" --clobber
