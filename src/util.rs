@@ -88,3 +88,34 @@ pub fn human_size(bytes: u64) -> String {
         format!("{mb:.0} MB")
     }
 }
+
+/// Abre `url` en el navegador predeterminado. Espera a que el abridor termine, así que
+/// conviene llamarla fuera del hilo de la interfaz.
+pub fn open_url(url: &str) -> Result<(), String> {
+    let candidates: &[(&str, &[&str])] = if cfg!(windows) {
+        // Sin `cmd /c start`, que rompe las URL con `&`.
+        &[("rundll32", &["url.dll,FileProtocolHandler"])]
+    } else if cfg!(target_os = "macos") {
+        &[("open", &[])]
+    } else {
+        // xdg-open respeta el navegador del escritorio y funciona dentro de Flatpak.
+        &[
+            ("xdg-open", &[]),
+            ("gio", &["open"]),
+            ("x-www-browser", &[]),
+        ]
+    };
+    for (program, pre) in candidates {
+        let status = command(program)
+            .args(*pre)
+            .arg(url)
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status();
+        if matches!(status, Ok(s) if s.success()) {
+            return Ok(());
+        }
+    }
+    Err(format!("no se pudo abrir el navegador para {url}"))
+}

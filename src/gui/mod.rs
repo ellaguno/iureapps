@@ -131,6 +131,21 @@ pub fn run() -> Result<(), String> {
     .map_err(|e| e.to_string())
 }
 
+/// Errores al abrir enlaces, que se pasan al registro en el siguiente fotograma.
+static LINK_ERRORS: std::sync::Mutex<Vec<String>> = std::sync::Mutex::new(Vec::new());
+
+/// Abre `url` en el navegador sin bloquear la interfaz.
+fn open_link(url: impl AsRef<str>) {
+    let url = url.as_ref().to_string();
+    std::thread::spawn(move || {
+        if let Err(e) = crate::util::open_url(&url) {
+            if let Ok(mut errors) = LINK_ERRORS.lock() {
+                errors.push(e);
+            }
+        }
+    });
+}
+
 /// Tamaño inicial; `IUREAPPS_WINDOW_SIZE=1280x900` lo cambia (útil para capturas).
 fn window_size() -> [f32; 2] {
     std::env::var("IUREAPPS_WINDOW_SIZE")
@@ -319,6 +334,9 @@ impl LauncherApp {
                     self.redetect(i);
                 }
             }
+        }
+        if let Ok(mut errors) = LINK_ERRORS.lock() {
+            self.log.append(&mut errors);
         }
         if self.log.len() > 300 {
             self.log.drain(..self.log.len() - 300);

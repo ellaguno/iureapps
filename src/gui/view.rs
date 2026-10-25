@@ -255,7 +255,7 @@ impl LauncherApp {
                             self.update_dismissed = true;
                         }
                         if flat_button(ui, "Descargar", Some(TEXT), vec2(110.0, 30.0)).clicked() {
-                            ui.ctx().open_url(egui::OpenUrl::new_tab(&r.html_url));
+                            super::open_link(&r.html_url);
                         }
                         if ui
                             .add(
@@ -264,7 +264,7 @@ impl LauncherApp {
                             )
                             .clicked()
                         {
-                            ui.ctx().open_url(egui::OpenUrl::new_tab(&r.html_url));
+                            super::open_link(&r.html_url);
                         }
                     });
                 });
@@ -468,7 +468,7 @@ impl LauncherApp {
                     .on_hover_text(gh)
                     .clicked()
                 {
-                    ui.ctx().open_url(egui::OpenUrl::new_tab(gh));
+                    super::open_link(gh);
                 }
                 if let Some(s) = &saved {
                     ui.add_space(10.0);
@@ -480,7 +480,7 @@ impl LauncherApp {
                         .on_hover_text(&s.web_url)
                         .clicked()
                     {
-                        ui.ctx().open_url(egui::OpenUrl::new_tab(&s.web_url));
+                        super::open_link(&s.web_url);
                     }
                 }
             },
@@ -579,7 +579,7 @@ impl LauncherApp {
                     .on_hover_text(&s.web_url)
                     .clicked()
                 {
-                    ui.ctx().open_url(egui::OpenUrl::new_tab(&s.web_url));
+                    super::open_link(&s.web_url);
                 }
             }
         } else {
@@ -606,7 +606,7 @@ impl LauncherApp {
                 ui.set_min_width(210.0);
                 if let Some(s) = &saved {
                     if ui.button("Abrir la instancia en el navegador").clicked() {
-                        ui.ctx().open_url(egui::OpenUrl::new_tab(&s.web_url));
+                        super::open_link(&s.web_url);
                     }
                 }
                 if ui
@@ -807,7 +807,7 @@ impl LauncherApp {
                     .on_hover_text(&gh)
                     .clicked()
                 {
-                    ui.ctx().open_url(egui::OpenUrl::new_tab(gh));
+                    super::open_link(gh);
                 }
                 ui.add_space(10.0);
                 let notes_url = release
@@ -826,7 +826,7 @@ impl LauncherApp {
                     link.on_hover_text(notes.chars().take(900).collect::<String>())
                 };
                 if link.clicked() {
-                    ui.ctx().open_url(egui::OpenUrl::new_tab(notes_url));
+                    super::open_link(notes_url);
                 }
             },
         );
@@ -1108,10 +1108,10 @@ impl LauncherApp {
                     .map(|r| r.html_url.clone())
                     .unwrap_or_else(|| app.release_url());
                 if ui.button("Novedades de la versión").clicked() {
-                    ui.ctx().open_url(egui::OpenUrl::new_tab(notes));
+                    super::open_link(notes);
                 }
                 if ui.button("Todas las versiones").clicked() {
-                    ui.ctx().open_url(egui::OpenUrl::new_tab(app.release_url()));
+                    super::open_link(app.release_url());
                 }
                 if installed {
                     ui.separator();

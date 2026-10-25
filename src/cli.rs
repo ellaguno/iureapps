@@ -323,16 +323,5 @@ fn logout() -> Result<(), String> {
 
 fn open_web() -> Result<(), String> {
     let s = connect::saved().ok_or("no hay cuenta conectada (usa `iureapps conectar`)")?;
-    let opener = if cfg!(windows) {
-        "explorer"
-    } else if cfg!(target_os = "macos") {
-        "open"
-    } else {
-        "xdg-open"
-    };
-    crate::util::command(opener)
-        .arg(&s.web_url)
-        .spawn()
-        .map(|_| ())
-        .map_err(|e| format!("no se pudo abrir el navegador: {e}"))
+    crate::util::open_url(&s.web_url)
 }
