@@ -1,0 +1,63 @@
+[package]
+name = "iureapps"
+version = "0.1.2"
+edition = "2021"
+description = "Lanzador e instalador ligero de las apps de escritorio de Iurefficient"
+license = "MIT"
+repository = "https://github.com/ellaguno/iureapps"
+
+[dependencies]
+eframe = { version = "0.37", default-features = false, features = ["default_fonts", "glow", "wayland", "x11"] }
+ureq = { version = "3.5", default-features = false, features = ["rustls", "platform-verifier", "json", "gzip"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+minisign-verify = "0.3"
+base64 = "0.22"
+png = "0.18"
+# Cuenta compartida con las demás apps (mismo llavero y «cuenta activa»).
+iurefficient-connect = { git = "https://github.com/ellaguno/iurefficient-connect", tag = "v0.7.1" }
+tokio = { version = "1", features = ["rt"] }
+anyhow = "1"
+
+[profile.release]
+opt-level = "s"
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true
+
+# `cargo deb`: paquete para Debian/Ubuntu. egui abre OpenGL/EGL, Wayland/X11 y
+# xkbcommon en tiempo de ejecución (no aparecen en las dependencias enlazadas).
+[package.metadata.deb]
+maintainer = "Eduardo Llaguno <eduardo@llaguno.com>"
+section = "utils"
+priority = "optional"
+depends = "$auto, libxkbcommon-x11-0, libgl1, libegl1"
+recommends = "policykit-1 | pkexec, gnome-keyring | kwalletmanager"
+extended-description = """\
+Instala, actualiza y abre iureditor, IureTranscribe, IureOCR, IureDav, IureVoz e \
+IureProject desde sus releases de GitHub, escogiendo la versión adecuada para el \
+equipo (CPU, CUDA o Vulkan), y configura una sola vez la cuenta de Iurefficient \
+que comparten todas."""
+assets = [
+    ["target/release/iureapps", "usr/bin/", "755"],
+    ["assets/linux/iureapps.desktop", "usr/share/applications/", "644"],
+    ["assets/iureapps.png", "usr/share/icons/hicolor/256x256/apps/", "644"],
+    ["README.md", "usr/share/doc/iureapps/README.md", "644"],
+]
+
+# `cargo generate-rpm`: paquete para Fedora, openSUSE y derivadas.
+[package.metadata.generate-rpm]
+summary = "Lanzador e instalador de las apps de escritorio de Iurefficient"
+assets = [
+    { source = "target/release/iureapps", dest = "/usr/bin/iureapps", mode = "755" },
+    { source = "assets/linux/iureapps.desktop", dest = "/usr/share/applications/iureapps.desktop", mode = "644" },
+    { source = "assets/iureapps.png", dest = "/usr/share/icons/hicolor/256x256/apps/iureapps.png", mode = "644" },
+    { source = "README.md", dest = "/usr/share/doc/iureapps/README.md", mode = "644", doc = true },
+]
+
+[package.metadata.generate-rpm.requires]
+libxkbcommon-x11 = "*"
+mesa-libGL = "*"
+mesa-libEGL = "*"
+dbus-libs = "*"

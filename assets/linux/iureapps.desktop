@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=Iurefficient Apps
+GenericName=Lanzador de Iurefficient
+Comment=Instala, actualiza y abre las apps de escritorio de Iurefficient
+Exec=iureapps
+Icon=iureapps
+Terminal=false
+Categories=Utility;
+Keywords=iurefficient;iureditor;iuretranscribe;iureocr;iuredav;instalar;actualizar;
+StartupWMClass=iureapps

@@ -1,0 +1,112 @@
+name: Build
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      release:
+        description: "Versión a publicar (p. ej. v0.1.0); vacío = sólo compilar"
+        required: false
+        default: ""
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: linux-x64
+            os: ubuntu-22.04
+            target: x86_64-unknown-linux-gnu
+            bin: iureapps
+          - name: windows-x64
+            os: windows-latest
+            target: x86_64-pc-windows-msvc
+            bin: iureapps.exe
+          - name: macos-arm64
+            os: macos-latest
+            target: aarch64-apple-darwin
+            bin: iureapps
+          - name: macos-x64
+            os: macos-latest
+            target: x86_64-apple-darwin
+            bin: iureapps
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+          components: clippy, rustfmt
+      - uses: swatinem/rust-cache@v2
+      - name: Dependencias de Linux (llavero por D-Bus)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libdbus-1-dev pkg-config
+      - name: Formato y clippy
+        if: matrix.name == 'linux-x64'
+        run: |
+          cargo fmt --check
+          cargo clippy --target ${{ matrix.target }} -- -D warnings
+      - name: Pruebas
+        if: matrix.name != 'macos-x64'
+        run: cargo test --target ${{ matrix.target }}
+      - name: Compilar
+        run: cargo build --release --target ${{ matrix.target }}
+      - name: Renombrar
+        shell: bash
+        run: |
+          mkdir -p dist
+          bin="target/${{ matrix.target }}/release/${{ matrix.bin }}"
+          if [[ "${{ matrix.bin }}" == *.exe ]]; then
+            cp "$bin" "dist/iureapps-${{ matrix.name }}.exe"
+          else
+            # tar.gz conserva el permiso de ejecución (los artefactos lo pierden).
+            tar -czf "dist/iureapps-${{ matrix.name }}.tar.gz" -C "$(dirname "$bin")" iureapps
+          fi
+          ls -la dist
+      - name: Herramientas de empaquetado (Linux)
+        if: runner.os == 'Linux'
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-deb,cargo-generate-rpm
+      - name: Paquetes .deb y .rpm
+        if: runner.os == 'Linux'
+        run: |
+          # La metadata de Cargo.toml apunta a target/release/iureapps.
+          mkdir -p target/release
+          cp "target/${{ matrix.target }}/release/iureapps" target/release/iureapps
+          cargo deb --no-build --no-strip --output dist/
+          cargo generate-rpm --output dist/
+          ls -la dist
+      - uses: actions/upload-artifact@v4
+        with:
+          name: iureapps-${{ matrix.name }}
+          path: dist/*
+
+  # Release: al subir una etiqueta v* o al lanzar el workflow a mano con `release`.
+  # GitHub crea la etiqueta sobre el commit compilado si todavía no existe.
+  publish:
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v') || inputs.release != ''
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Publicar
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ inputs.release != '' && inputs.release || github.ref_name }}
+        run: |
+          ls -la dist
+          gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1 || \
+            gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" \
+              --title "Iurefficient Apps ${TAG#v}" --generate-notes
+          gh release upload "$TAG" dist/* --repo "$GITHUB_REPOSITORY" --clobber
