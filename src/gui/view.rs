@@ -227,18 +227,7 @@ impl LauncherApp {
         ui.horizontal(|ui| {
             ui.set_min_height(48.0);
             let narrow = ui.available_width() < 560.0;
-            let mut brand = LayoutJob::default();
-            brand.append(
-                "IUREFFICIENT",
-                0.0,
-                TextFormat {
-                    font_id: theme::bold_font(if narrow { 15.0 } else { 19.0 }),
-                    color: TEXT,
-                    extra_letter_spacing: if narrow { 1.2 } else { 2.5 },
-                    ..Default::default()
-                },
-            );
-            ui.label(brand);
+            self.icons.logo(ui, if narrow { 18.0 } else { 24.0 });
             let full = ui.available_width() > 700.0;
             ui.add_space(10.0);
             if full {
@@ -555,7 +544,7 @@ impl LauncherApp {
 
         let top = strip.bottom() + 20.0;
         let icon = Rect::from_min_size(pos2(rect.left() + PAD, top), vec2(60.0, 60.0));
-        theme::paint_drawn_icon(&painter, icon, "iurefficient", accent);
+        self.icons.paint(&painter, icon, "iurefficient", accent);
         let (tagline, hint) = match (&saved, connected) {
             (Some(s), true) => (
                 format!(
@@ -582,7 +571,9 @@ impl LauncherApp {
                 .layout(Layout::top_down(Align::Min)),
             |ui| {
                 ui.spacing_mut().item_spacing.y = 2.0;
-                ui.label(two_tone("Iurefficient", 25.0, accent));
+                ui.add_space(4.0);
+                self.icons.logo(ui, 22.0);
+                ui.add_space(2.0);
                 ui.add(egui::Label::new(RichText::new(tagline).size(14.5).color(TEXT)).truncate());
                 ui.add(egui::Label::new(RichText::new(hint).size(12.5).color(FAINT)).truncate());
             },
@@ -1213,13 +1204,11 @@ impl LauncherApp {
                         ui.end_row();
                         if self.account_matches() {
                             let (r, _) = ui.allocate_exact_size(vec2(32.0, 32.0), Sense::hover());
-                            theme::paint_drawn_icon(ui.painter(), r, "iurefficient", INFO);
+                            self.icons.paint(ui.painter(), r, "iurefficient", INFO);
                             ui.vertical(|ui| {
                                 ui.set_min_width(230.0);
                                 ui.spacing_mut().item_spacing.y = 0.0;
-                                ui.add(
-                                    egui::Label::new(two_tone("Iurefficient", 15.0, INFO)).extend(),
-                                );
+                                self.icons.logo(ui, 14.0);
                                 ui.add(
                                     egui::Label::new(
                                         RichText::new("Cuenta para todas las apps")

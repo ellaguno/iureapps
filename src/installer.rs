@@ -261,7 +261,19 @@ pub fn install(
         (Some(_), None) => {
             log("Aviso: este instalador no publica firma; se instala sin verificar.".into())
         }
-        _ => {}
+        (None, _) => match release.assets.iter().find(|a| a.name == "SHA256SUMS") {
+            Some(sums) => {
+                let text = github::fetch_text(sums, token)?;
+                if let Err(e) = crate::verify::verify_sha256(&text, &asset.name, &file) {
+                    let _ = std::fs::remove_file(&file);
+                    return Err(e);
+                }
+                log("Suma SHA-256 verificada".into());
+            }
+            None => {
+                log("Aviso: la release no publica SHA256SUMS; se instala sin verificar.".into())
+            }
+        },
     }
 
     let result = match format {
@@ -386,25 +398,11 @@ fn install_windows(file: &Path) -> Result<(), String> {
     ps_run_wait(&file.to_string_lossy(), "/S")
 }
 
+/// Instala la `.app` de un `.app.tar.gz` (Tauri) o de un `.dmg` (cargo-packager).
 fn install_mac(app: &AppDef, file: &Path) -> Result<PathBuf, String> {
     let tmp = util::data_dir().join("tmp").join(app.id);
     let _ = std::fs::remove_dir_all(&tmp);
     std::fs::create_dir_all(&tmp).map_err(|e| e.to_string())?;
-    run(
-        "tar",
-        &[
-            "-xzf",
-            &file.to_string_lossy(),
-            "-C",
-            &tmp.to_string_lossy(),
-        ],
-    )?;
-    let bundle = std::fs::read_dir(&tmp)
-        .map_err(|e| e.to_string())?
-        .flatten()
-        .map(|e| e.path())
-        .find(|p| p.extension().is_some_and(|x| x == "app"))
-        .ok_or("el archivo no contiene una .app")?;
     // /Applications si se puede escribir; si no, ~/Applications.
     let dir = mac_app_dirs()
         .into_iter()
@@ -417,19 +415,81 @@ fn install_mac(app: &AppDef, file: &Path) -> Result<PathBuf, String> {
         })
         .ok_or("no hay carpeta de Aplicaciones con permiso de escritura")?;
     let dest = dir.join(format!("{}.app", app.name));
-    if dest.exists() {
-        std::fs::remove_dir_all(&dest)
-            .map_err(|e| format!("no se pudo reemplazar {}: {e}", dest.display()))?;
-    }
-    if std::fs::rename(&bundle, &dest).is_err() {
-        run("mv", &[&bundle.to_string_lossy(), &dest.to_string_lossy()])?;
-    }
+    let result = if file.extension().is_some_and(|x| x == "dmg") {
+        install_mac_dmg(file, &tmp, &dest)
+    } else {
+        install_mac_tar(file, &tmp, &dest)
+    };
+    let _ = std::fs::remove_dir_all(&tmp);
+    result?;
     let _ = run(
         "xattr",
         &["-dr", "com.apple.quarantine", &dest.to_string_lossy()],
     );
-    let _ = std::fs::remove_dir_all(&tmp);
     Ok(dest)
+}
+
+fn find_app_bundle(dir: &Path) -> Result<PathBuf, String> {
+    std::fs::read_dir(dir)
+        .map_err(|e| e.to_string())?
+        .flatten()
+        .map(|e| e.path())
+        .find(|p| p.extension().is_some_and(|x| x == "app"))
+        .ok_or_else(|| "el archivo no contiene una .app".into())
+}
+
+fn replace_app(dest: &Path) -> Result<(), String> {
+    if dest.exists() {
+        std::fs::remove_dir_all(dest)
+            .map_err(|e| format!("no se pudo reemplazar {}: {e}", dest.display()))?;
+    }
+    Ok(())
+}
+
+fn install_mac_tar(file: &Path, tmp: &Path, dest: &Path) -> Result<(), String> {
+    run(
+        "tar",
+        &[
+            "-xzf",
+            &file.to_string_lossy(),
+            "-C",
+            &tmp.to_string_lossy(),
+        ],
+    )?;
+    let bundle = find_app_bundle(tmp)?;
+    replace_app(dest)?;
+    if std::fs::rename(&bundle, dest).is_err() {
+        run("mv", &[&bundle.to_string_lossy(), &dest.to_string_lossy()])?;
+    }
+    Ok(())
+}
+
+/// Monta el `.dmg` sin abrir Finder, copia la `.app` con `ditto` y lo desmonta.
+fn install_mac_dmg(file: &Path, tmp: &Path, dest: &Path) -> Result<(), String> {
+    let mnt = tmp.join("dmg");
+    std::fs::create_dir_all(&mnt).map_err(|e| e.to_string())?;
+    let mnt_s = mnt.to_string_lossy();
+    run(
+        "hdiutil",
+        &[
+            "attach",
+            "-nobrowse",
+            "-readonly",
+            "-noautoopen",
+            "-mountpoint",
+            &mnt_s,
+            &file.to_string_lossy(),
+        ],
+    )?;
+    let copied = find_app_bundle(&mnt).and_then(|bundle| {
+        replace_app(dest)?;
+        run(
+            "ditto",
+            &[&bundle.to_string_lossy(), &dest.to_string_lossy()],
+        )
+    });
+    let _ = run("hdiutil", &["detach", &mnt_s, "-force"]);
+    copied
 }
 
 pub fn uninstall(app: &AppDef, installed: &Installed) -> Result<(), String> {

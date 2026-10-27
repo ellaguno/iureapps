@@ -13,11 +13,15 @@ pub enum Packaging {
     Tauri,
     /// Sólo `.deb` hecho con cargo-deb (`<crate>_<ver>-1_amd64.deb`).
     CargoDeb,
+    /// cargo-packager: `<bin>_<ver>_x86_64.AppImage`, `<bin>_<ver>_amd64.deb`,
+    /// `<bin>_<ver>_x64-setup.exe` y `<Producto>_<ver>_<aarch64|x64>.dmg`, con `SHA256SUMS`.
+    Packager,
 }
 
 pub struct AppDef {
     pub id: &'static str,
     pub name: &'static str,
+    /// Repositorio de GitHub de donde salen las releases (el de descargas si el código es privado).
     pub repo: &'static str,
     pub description: &'static str,
     /// Qué es, en pocas palabras (mosaico).
@@ -126,6 +130,22 @@ pub static APPS: &[AppDef] = &[
         linux_bins: &["iurevoz"],
         pubkey: None,
         note: "Sólo Linux (.deb), pensado para GNOME en Wayland.",
+    },
+    AppDef {
+        id: "iuredesk",
+        name: "IureDesk",
+        repo: "ellaguno/iuredesk-releases",
+        description: "Correo, calendario, contactos, notas y tareas, integrado con Iurefficient.",
+        tagline: "Correo y agenda",
+        hint: "Correo, calendario, contactos y tareas",
+        accent: [14, 165, 233],
+        experimental: true,
+        packaging: Packaging::Packager,
+        oses: ALL,
+        gpu_variants: false,
+        linux_bins: &["iuredesk"],
+        pubkey: None,
+        note: "Versión de prueba.",
     },
     AppDef {
         id: "iureproject",
@@ -351,6 +371,23 @@ impl AppDef {
                     return None;
                 }
                 release.assets.iter().find(|a| a.name.ends_with(arch))?
+            }
+            Packaging::Packager => {
+                let ends: &[&str] = match (sys.os, sys.arch, format) {
+                    (Os::Linux, Arch::X64, Format::AppImage) => &["_x86_64.AppImage"],
+                    (Os::Linux, Arch::X64, Format::Deb) => &["_amd64.deb"],
+                    (Os::Linux, Arch::Arm64, Format::AppImage) => &["_aarch64.AppImage"],
+                    (Os::Linux, Arch::Arm64, Format::Deb) => &["_arm64.deb"],
+                    (Os::Windows, Arch::Arm64, Format::WinExe) => {
+                        &["_arm64-setup.exe", "_x64-setup.exe"]
+                    }
+                    (Os::Windows, _, Format::WinExe) => &["_x64-setup.exe"],
+                    (Os::MacOs, Arch::Arm64, Format::MacApp) => &["_aarch64.dmg", "_universal.dmg"],
+                    (Os::MacOs, Arch::X64, Format::MacApp) => &["_x64.dmg", "_universal.dmg"],
+                    _ => return None,
+                };
+                ends.iter()
+                    .find_map(|e| release.assets.iter().find(|a| a.name.ends_with(e)))?
             }
             Packaging::Tauri => {
                 let suffix = match variant {
@@ -581,6 +618,54 @@ mod tests {
             Format::Deb
         )
         .is_none());
+    }
+
+    #[test]
+    fn picks_packager_assets() {
+        let names = [
+            "iuredesk-0.3.0-x86_64-linux.tar.gz",
+            "iuredesk_0.3.0_amd64.deb",
+            "iuredesk_0.3.0_x86_64.AppImage",
+            "iuredesk_0.3.0_x64-setup.exe",
+            "IureDesk_0.3.0_aarch64.dmg",
+            "IureDesk_0.3.0_x64.dmg",
+            "SHA256SUMS",
+        ];
+        let r = Release {
+            tag_name: "v0.3.0".into(),
+            html_url: String::new(),
+            body: None,
+            published_at: None,
+            assets: names
+                .iter()
+                .map(|n| Asset {
+                    name: n.to_string(),
+                    size: 1,
+                    browser_download_url: String::new(),
+                    url: String::new(),
+                })
+                .collect(),
+        };
+        let linux = sys(Os::Linux, Arch::X64);
+        let p = |s: &SystemInfo, f| pick("iuredesk", &r, s, Variant::Cpu, f);
+        assert_eq!(
+            p(&linux, Format::AppImage).unwrap(),
+            "iuredesk_0.3.0_x86_64.AppImage"
+        );
+        assert_eq!(p(&linux, Format::Deb).unwrap(), "iuredesk_0.3.0_amd64.deb");
+        assert!(p(&linux, Format::Rpm).is_none());
+        let win = sys(Os::Windows, Arch::Arm64);
+        assert_eq!(
+            p(&win, Format::WinExe).unwrap(),
+            "iuredesk_0.3.0_x64-setup.exe"
+        );
+        let mac = sys(Os::MacOs, Arch::Arm64);
+        assert_eq!(
+            p(&mac, Format::MacApp).unwrap(),
+            "IureDesk_0.3.0_aarch64.dmg"
+        );
+        let mac = sys(Os::MacOs, Arch::X64);
+        assert_eq!(p(&mac, Format::MacApp).unwrap(), "IureDesk_0.3.0_x64.dmg");
     }
 
     #[test]
