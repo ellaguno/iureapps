@@ -34,15 +34,79 @@ fn caps_label(ui: &mut Ui, text: &str, size: f32, color: Color32) -> egui::Respo
     ui.label(caps(text, size, color))
 }
 
+/// Botón pintado a mano: a diferencia de `egui::Button` con `fill`, conserva el cambio al
+/// pasar el ratón y al pulsar (se oscurece y se hunde 1 px), con cursor de mano.
+fn press_button(
+    ui: &mut Ui,
+    job: LayoutJob,
+    fill: Color32,
+    stroke: Stroke,
+    radius: CornerRadius,
+    min: egui::Vec2,
+) -> egui::Response {
+    let galley = ui.fonts_mut(|f| f.layout_job(job));
+    let size = (galley.size() + 2.0 * ui.spacing().button_padding).max(min);
+    let (rect, resp) = ui.allocate_exact_size(size, Sense::click());
+    if ui.is_rect_visible(rect) {
+        let enabled = ui.is_enabled();
+        let pressed = enabled && resp.is_pointer_button_down_on();
+        let hovered = enabled && resp.hovered();
+        // Fondo claro: se oscurece; fondo transparente: se ilumina como el resto de la UI.
+        let (bg, line) = if fill == Color32::TRANSPARENT {
+            let v = &ui.visuals().widgets;
+            match (pressed, hovered) {
+                (true, _) => (v.active.weak_bg_fill, v.hovered.bg_stroke.color),
+                (false, true) => (v.hovered.weak_bg_fill, v.hovered.bg_stroke.color),
+                _ => (fill, stroke.color),
+            }
+        } else {
+            let t = if pressed {
+                0.28
+            } else if hovered {
+                0.14
+            } else {
+                0.0
+            };
+            (fill.lerp_to_gamma(BG, t), stroke.color)
+        };
+        let r = if pressed {
+            rect.translate(vec2(0.0, 1.0)).shrink(0.5)
+        } else {
+            rect
+        };
+        // Deshabilitado, el pintor de `ui` ya lo atenúa.
+        ui.painter().rect(
+            r,
+            radius,
+            bg,
+            Stroke::new(stroke.width, line),
+            StrokeKind::Inside,
+        );
+        ui.painter()
+            .galley(r.center() - galley.size() / 2.0, galley, TEXT);
+    }
+    if ui.is_enabled() {
+        resp.on_hover_cursor(egui::CursorIcon::PointingHand)
+    } else {
+        resp
+    }
+}
+
 /// Botón plano con texto en mayúsculas; `fill` da el botón principal (fondo claro).
 fn flat_button(ui: &mut Ui, text: &str, fill: Option<Color32>, min: egui::Vec2) -> egui::Response {
     let fg = if fill.is_some() { BG } else { TEXT };
-    let mut b = egui::Button::new(caps(text, 11.5, fg)).min_size(min);
-    b = match fill {
-        Some(f) => b.fill(f).stroke(Stroke::NONE),
-        None => b.fill(Color32::TRANSPARENT).stroke(Stroke::new(1.0, LINE)),
-    };
-    ui.add(b)
+    let radius = ui.visuals().widgets.inactive.corner_radius;
+    match fill {
+        Some(f) => press_button(ui, caps(text, 11.5, fg), f, Stroke::NONE, radius, min),
+        None => press_button(
+            ui,
+            caps(text, 11.5, fg),
+            Color32::TRANSPARENT,
+            Stroke::new(1.0, LINE),
+            radius,
+            min,
+        ),
+    }
 }
 
 /// Grupo de opciones contiguas; devuelve el índice pulsado.
@@ -56,12 +120,15 @@ fn segmented(ui: &mut Ui, items: &[(String, bool)]) -> Option<usize> {
             } else {
                 (MUTED, Color32::TRANSPARENT)
             };
-            let b = egui::Button::new(caps(label, 11.0, fg))
-                .fill(fill)
-                .stroke(Stroke::new(1.0, LINE))
-                .corner_radius(CornerRadius::ZERO)
-                .min_size(vec2(0.0, 30.0));
-            if ui.add(b).clicked() {
+            let b = press_button(
+                ui,
+                caps(label, 11.0, fg),
+                fill,
+                Stroke::new(1.0, LINE),
+                CornerRadius::ZERO,
+                vec2(0.0, 30.0),
+            );
+            if b.clicked() {
                 clicked = Some(k);
             }
         }
@@ -598,9 +665,9 @@ impl LauncherApp {
         ui.add_space(8.0);
         ui.scope(|ui| {
             ui.spacing_mut().button_padding = vec2(0.0, 0.0);
+            // Transparente en reposo, sin perder el realce al pasar el ratón y al pulsar.
+            ui.visuals_mut().widgets.inactive.weak_bg_fill = Color32::TRANSPARENT;
             let menu = egui::Button::new(RichText::new("···").size(15.0).color(TEXT))
-                .fill(Color32::TRANSPARENT)
-                .stroke(Stroke::new(1.0, LINE))
                 .min_size(vec2(36.0, 36.0));
             egui::containers::menu::MenuButton::from_button(menu).ui(ui, |ui| {
                 ui.set_min_width(210.0);
@@ -1089,9 +1156,9 @@ impl LauncherApp {
         ui.add_space(8.0);
         ui.scope(|ui| {
             ui.spacing_mut().button_padding = vec2(0.0, 0.0);
+            // Transparente en reposo, sin perder el realce al pasar el ratón y al pulsar.
+            ui.visuals_mut().widgets.inactive.weak_bg_fill = Color32::TRANSPARENT;
             let menu = egui::Button::new(RichText::new("···").size(15.0).color(TEXT))
-                .fill(Color32::TRANSPARENT)
-                .stroke(Stroke::new(1.0, LINE))
                 .min_size(vec2(36.0, 36.0));
             egui::containers::menu::MenuButton::from_button(menu).ui(ui, |ui| {
                 ui.set_min_width(200.0);
