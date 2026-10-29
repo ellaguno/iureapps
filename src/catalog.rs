@@ -71,7 +71,7 @@ pub static APPS: &[AppDef] = &[
     },
     AppDef {
         id: "iuretranscribe",
-        name: "IureTranscribe",
+        name: "iureTranscribe",
         repo: "ellaguno/iuretranscribe",
         description:
             "Transcribe reuniones y grabaciones en tu equipo con Whisper; resumen y minuta.",
@@ -88,7 +88,7 @@ pub static APPS: &[AppDef] = &[
     },
     AppDef {
         id: "iureocr",
-        name: "IureOCR",
+        name: "iureOCR",
         repo: "ellaguno/iureocr",
         description:
             "Convierte escaneos y fotos de documentos en PDF con texto buscable (Tesseract).",
@@ -105,7 +105,7 @@ pub static APPS: &[AppDef] = &[
     },
     AppDef {
         id: "iuredav",
-        name: "IureDav",
+        name: "iureDav",
         repo: "ellaguno/iuredav",
         description: "Tu servidor WebDAV (o Iurefficient) como una carpeta más del equipo.",
         tagline: "Unidad WebDAV",
@@ -121,7 +121,7 @@ pub static APPS: &[AppDef] = &[
     },
     AppDef {
         id: "iurevoz",
-        name: "IureVoz",
+        name: "iureVoz",
         repo: "ellaguno/iurevoz",
         description: "Dictado y control del escritorio por voz, local y sólo CPU.",
         tagline: "Dictado por voz",
@@ -137,7 +137,7 @@ pub static APPS: &[AppDef] = &[
     },
     AppDef {
         id: "iuredesk",
-        name: "IureDesk",
+        name: "iureDesk",
         // Código abierto: los releases están en el propio repo (ya no en iuredesk-releases).
         repo: "ellaguno/iuredesk",
         description: "Correo, calendario, contactos, notas y tareas; integrado con Iurefficient.",
@@ -157,7 +157,7 @@ pub static APPS: &[AppDef] = &[
     },
     AppDef {
         id: "iureproject",
-        name: "IureProject",
+        name: "iureProject",
         repo: "ellaguno/iureproject-releases",
         description: "Gestión de proyectos en Rust puro, compatible con Microsoft Project.",
         tagline: "Gestión de proyectos",
