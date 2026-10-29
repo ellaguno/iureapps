@@ -1,6 +1,6 @@
 [package]
 name = "iureapps"
-version = "0.1.2"
+version = "0.1.4"
 edition = "2021"
 description = "Lanzador e instalador ligero de las apps de escritorio de Iurefficient"
 license = "MIT"
@@ -8,6 +8,10 @@ repository = "https://github.com/ellaguno/iureapps"
 
 [dependencies]
 eframe = { version = "0.37", default-features = false, features = ["default_fonts", "glow", "wayland", "x11"] }
+# En Wayland, GNOME no decora las ventanas: con esto winit dibuja la barra de título con el
+# estilo de GNOME (Adwaita, tema claro u oscuro del sistema) en vez de su marco genérico. En
+# KDE, Sway, X11, Windows y macOS la barra la pone el sistema.
+winit = { version = "0.30", default-features = false, features = ["wayland-csd-adwaita"] }
 ureq = { version = "3.5", default-features = false, features = ["rustls", "platform-verifier", "json", "gzip"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
