@@ -37,6 +37,7 @@ Qué hace:
 | Sistema | Formato | Dónde |
 | --- | --- | --- |
 | Linux | AppImage (por defecto, sin root) | `~/.local/share/iureapps/apps/` + entrada en el menú |
+| Linux | `.tar.gz` con los binarios (IureProject) | `~/.local/share/iureapps/apps/<app>/` + entrada en el menú |
 | Linux | `.deb` / `.rpm` (CUDA, IureVoz, o si no hay FUSE) | `pkexec apt-get install` / `dnf install` |
 | Windows | instalador NSIS `.exe` en modo silencioso (`/S`) | lo que defina cada app (IureDav pide administrador) |
 | macOS | `.app.tar.gz` (o `.dmg` en IureDesk) | `/Applications` o `~/Applications`, sin cuarentena |
@@ -59,9 +60,10 @@ iureapps iurefficient         # abre la instancia en el navegador
 iureapps desconectar
 ```
 
-IureDesk publica sus instaladores en el repo de descargas `ellaguno/iuredesk-releases`.
-IureVoz e IureProject están en repos privados: configura un token de GitHub de sólo lectura
-en *Ajustes* o con la variable `IUREAPPS_GITHUB_TOKEN`. El token también sube el límite de la
+IureDesk e IureProject publican sus instaladores en repos de descargas públicos
+(`ellaguno/iuredesk-releases`, `ellaguno/iureproject-releases`). IureVoz está en un repo
+privado: configura un token de GitHub de sólo lectura en *Ajustes* o con la variable
+`IUREAPPS_GITHUB_TOKEN`. El token también sube el límite de la
 API de 60 a 5000 consultas por hora.
 
 ## Recursos
@@ -121,7 +123,6 @@ Si sigue el esquema de nombres de los instaladores Tauri de la suite
 
 - **Fase 2 (resto)**: miniaturas o capturas de cada app (`docs/media` de cada repo) en una
   vista de detalle, e icono propio para IureVoz e IureProject (hoy se dibujan en código).
-- IureProject: leer sus descargas de `iureproject-releases` e instalar su `.tar.gz`.
 - Cuenta: elegir entre varias cuentas o instancias, y ver o revocar las contraseñas WebDAV y
   los tokens MCP del equipo.
 - Autoactualización del lanzador (hoy sólo avisa y enlaza la descarga).

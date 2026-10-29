@@ -13,8 +13,9 @@ pub enum Packaging {
     Tauri,
     /// Sólo `.deb` hecho con cargo-deb (`<crate>_<ver>-1_amd64.deb`).
     CargoDeb,
-    /// cargo-packager: `<bin>_<ver>_x86_64.AppImage`, `<bin>_<ver>_amd64.deb`,
-    /// `<bin>_<ver>_x64-setup.exe` y `<Producto>_<ver>_<aarch64|x64>.dmg`, con `SHA256SUMS`.
+    /// Apps en Rust de la suite (`cargo xtask dist` / `package`), con `SHA256SUMS`:
+    /// `<bin>-<ver>-x86_64-linux.tar.gz` y, con cargo-packager, `<bin>_<ver>_x86_64.AppImage`,
+    /// `<bin>_<ver>_amd64.deb`, `<bin>_<ver>_x64-setup.exe` y `<Producto>_<ver>_<aarch64|x64>.dmg`.
     Packager,
 }
 
@@ -150,18 +151,18 @@ pub static APPS: &[AppDef] = &[
     AppDef {
         id: "iureproject",
         name: "IureProject",
-        repo: "ellaguno/iureproject",
+        repo: "ellaguno/iureproject-releases",
         description: "Gestión de proyectos en Rust puro, compatible con Microsoft Project.",
         tagline: "Gestión de proyectos",
         hint: "Compatible con archivos de MS Project",
         accent: [34, 197, 94],
         experimental: true,
-        packaging: Packaging::Tauri,
+        packaging: Packaging::Packager,
         oses: &[Os::Linux],
         gpu_variants: false,
         linux_bins: &["iureproject"],
         pubkey: None,
-        note: "En desarrollo (fase 0): aún sin versiones publicadas.",
+        note: "En desarrollo. Sólo Linux x64 (binario .tar.gz).",
     },
 ];
 
@@ -207,6 +208,8 @@ pub enum Format {
     WinExe,
     /// `.app.tar.gz` de macOS.
     MacApp,
+    /// Binarios sueltos en `.tar.gz` (Linux), sin instalador.
+    TarGz,
 }
 
 impl Format {
@@ -217,6 +220,7 @@ impl Format {
             Format::Rpm => ".rpm",
             Format::WinExe => "Instalador .exe",
             Format::MacApp => ".app",
+            Format::TarGz => "Binario .tar.gz",
         }
     }
     fn ext(self) -> &'static str {
@@ -226,6 +230,7 @@ impl Format {
             Format::Rpm => ".rpm",
             Format::WinExe => ".exe",
             Format::MacApp => ".app.tar.gz",
+            Format::TarGz => ".tar.gz",
         }
     }
     pub fn parse(s: &str) -> Option<Self> {
@@ -235,6 +240,7 @@ impl Format {
             "rpm" => Some(Format::Rpm),
             "exe" => Some(Format::WinExe),
             "app" => Some(Format::MacApp),
+            "tar.gz" | "targz" | "tar" => Some(Format::TarGz),
             _ => None,
         }
     }
@@ -276,6 +282,8 @@ impl AppDef {
                 if sys.pkg != PkgFamily::Rpm {
                     f.retain(|x| *x != Format::Rpm);
                 }
+                // Último recurso: sólo lo publican las apps en Rust de la suite.
+                f.push(Format::TarGz);
                 f
             }
             Os::Other => vec![],
@@ -378,6 +386,8 @@ impl AppDef {
                     (Os::Linux, Arch::X64, Format::Deb) => &["_amd64.deb"],
                     (Os::Linux, Arch::Arm64, Format::AppImage) => &["_aarch64.AppImage"],
                     (Os::Linux, Arch::Arm64, Format::Deb) => &["_arm64.deb"],
+                    (Os::Linux, Arch::X64, Format::TarGz) => &["-x86_64-linux.tar.gz"],
+                    (Os::Linux, Arch::Arm64, Format::TarGz) => &["-aarch64-linux.tar.gz"],
                     (Os::Windows, Arch::Arm64, Format::WinExe) => {
                         &["_arm64-setup.exe", "_x64-setup.exe"]
                     }
@@ -666,6 +676,24 @@ mod tests {
         );
         let mac = sys(Os::MacOs, Arch::X64);
         assert_eq!(p(&mac, Format::MacApp).unwrap(), "IureDesk_0.3.0_x64.dmg");
+        assert_eq!(
+            p(&linux, Format::TarGz).unwrap(),
+            "iuredesk-0.3.0-x86_64-linux.tar.gz"
+        );
+        // IureProject sólo publica el .tar.gz de `cargo xtask dist`.
+        let mut r = r.clone();
+        r.assets.retain(|a| a.name.ends_with(".tar.gz"));
+        for a in &mut r.assets {
+            a.name = "iureproject-0.2.0-x86_64-linux.tar.gz".into();
+        }
+        let app = find("iureproject").unwrap();
+        assert_eq!(
+            app.best_format(&r, &linux, Variant::Cpu),
+            Some(Format::TarGz)
+        );
+        assert!(app
+            .best_format(&r, &sys(Os::Windows, Arch::X64), Variant::Cpu)
+            .is_none());
     }
 
     #[test]
