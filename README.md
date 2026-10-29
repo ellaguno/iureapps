@@ -2,7 +2,7 @@
 
 Lanzador e instalador ligero, en Rust, de las apps de escritorio de
 [Iurefficient](https://iurefficient.com): **iureditor, IureTranscribe, IureOCR, IureDav,
-IureVoz e IureProject**. Un solo ejecutable (~7 MB) para Linux, Windows y macOS.
+IureVoz, IureDesk e IureProject**. Un solo ejecutable (~7 MB) para Linux, Windows y macOS.
 
 La ventana muestra las apps en **mosaico** (o en tabla): icono, nombre con el color de cada
 app, estado, versión, aceleración elegida y la acción principal (instalar, actualizar o
@@ -29,16 +29,18 @@ Qué hace:
   IureOCR e iureditor la toman al abrirse si no tienen otra configurada. «Abrir
   Iurefficient» abre la instancia en el navegador.
 - **Verifica la firma minisign** (`.sig`) de cada instalador con la clave pública del
-  actualizador de cada app antes de instalarlo.
+  actualizador de cada app antes de instalarlo; las apps que no firman (IureDesk) se
+  comprueban contra el `SHA256SUMS` de su release.
 
 ## Cómo instala en cada sistema
 
 | Sistema | Formato | Dónde |
 | --- | --- | --- |
 | Linux | AppImage (por defecto, sin root) | `~/.local/share/iureapps/apps/` + entrada en el menú |
+| Linux | `.tar.gz` con los binarios (IureProject) | `~/.local/share/iureapps/apps/<app>/` + entrada en el menú |
 | Linux | `.deb` / `.rpm` (CUDA, IureVoz, o si no hay FUSE) | `pkexec apt-get install` / `dnf install` |
 | Windows | instalador NSIS `.exe` en modo silencioso (`/S`) | lo que defina cada app (IureDav pide administrador) |
-| macOS | `.app.tar.gz` | `/Applications` o `~/Applications`, sin cuarentena |
+| macOS | `.app.tar.gz` (o `.dmg` en IureDesk) | `/Applications` o `~/Applications`, sin cuarentena |
 
 Sin `libfuse2` los AppImage se ejecutan con `APPIMAGE_EXTRACT_AND_RUN=1`.
 
@@ -58,14 +60,18 @@ iureapps iurefficient         # abre la instancia en el navegador
 iureapps desconectar
 ```
 
-IureVoz e IureProject están en repos privados: configura un token de GitHub de sólo lectura
-en *Ajustes* o con la variable `IUREAPPS_GITHUB_TOKEN`. El token también sube el límite de la
+IureDesk e IureProject publican sus instaladores en repos de descargas públicos
+(`ellaguno/iuredesk-releases`, `ellaguno/iureproject-releases`). IureVoz está en un repo
+privado: configura un token de GitHub de sólo lectura en *Ajustes* o con la variable
+`IUREAPPS_GITHUB_TOKEN`. El token también sube el límite de la
 API de 60 a 5000 consultas por hora.
 
 ## Recursos
 
 Iconos y fuentes incluidos (Inter y JetBrains Mono, subconjunto latino): ver
-[`assets/ATTRIBUTION.md`](assets/ATTRIBUTION.md).
+[`assets/ATTRIBUTION.md`](assets/ATTRIBUTION.md). El icono y el logotipo de Iurefficient
+están en SVG en `assets/brand/`; `build.rs` los pasa a PNG al compilar (el logotipo, con las
+letras claras para el fondo oscuro).
 
 ## Compilar
 
@@ -107,10 +113,11 @@ binario no está firmado: la primera vez, clic derecho → Abrir (o
 
 ## Agregar una app
 
-Una entrada en `APPS` de `src/catalog.rs`: repo, nombre de producto, sistemas, si tiene
-variantes de GPU y la clave pública del actualizador. Si sigue el esquema de nombres de los
-instaladores Tauri de la suite (`<Producto>_<ver>_<n>-<plataforma>[-cuda|-vulkan].<ext>`), no
-hace falta nada más.
+Una entrada en `APPS` de `src/catalog.rs`: repo (el de descargas si el código es privado),
+nombre de producto, sistemas, si tiene variantes de GPU y la clave pública del actualizador.
+Si sigue el esquema de nombres de los instaladores Tauri de la suite
+(`<Producto>_<ver>_<n>-<plataforma>[-cuda|-vulkan].<ext>`) o el de cargo-packager
+(`Packaging::Packager`, como IureDesk), no hace falta nada más.
 
 ## Siguientes fases
 

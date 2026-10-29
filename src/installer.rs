@@ -261,7 +261,19 @@ pub fn install(
         (Some(_), None) => {
             log("Aviso: este instalador no publica firma; se instala sin verificar.".into())
         }
-        _ => {}
+        (None, _) => match release.assets.iter().find(|a| a.name == "SHA256SUMS") {
+            Some(sums) => {
+                let text = github::fetch_text(sums, token)?;
+                if let Err(e) = crate::verify::verify_sha256(&text, &asset.name, &file) {
+                    let _ = std::fs::remove_file(&file);
+                    return Err(e);
+                }
+                log("Suma SHA-256 verificada".into());
+            }
+            None => {
+                log("Aviso: la release no publica SHA256SUMS; se instala sin verificar.".into())
+            }
+        },
     }
 
     let result = match format {
@@ -270,17 +282,28 @@ pub fn install(
         Format::Rpm => install_rpm(&file).map(|_| None),
         Format::WinExe => install_windows(&file).map(|_| None),
         Format::MacApp => install_mac(app, &file).map(Some),
+        Format::TarGz => install_tarball(app, &file).map(Some),
     };
     let _ = std::fs::remove_file(&file);
     let path = result?;
 
     // Si cambió de formato (p. ej. de AppImage a .deb para usar CUDA) se quita el anterior.
-    if let Some(prev) = previous {
-        if prev.format == Format::AppImage && format != Format::AppImage {
-            if let Some(p) = &prev.path {
-                let _ = std::fs::remove_file(p);
-                let _ = std::fs::remove_file(desktop_file(app));
-                log("Se quitó el AppImage anterior.".into());
+    if let Some(prev) = previous.filter(|p| p.format != format) {
+        if let Some(p) = &prev.path {
+            let removed = match prev.format {
+                Format::AppImage => std::fs::remove_file(p).is_ok(),
+                Format::TarGz => remove_tarball_dir(app, p),
+                _ => false,
+            };
+            if removed {
+                // AppImage y .tar.gz escriben la misma entrada del menú: no borrar la nueva.
+                if !matches!(format, Format::AppImage | Format::TarGz) {
+                    let _ = std::fs::remove_file(desktop_file(app));
+                }
+                log(format!(
+                    "Se quitó la instalación anterior ({}).",
+                    prev.format.label()
+                ));
             }
         }
     }
@@ -307,12 +330,17 @@ fn install_appimage(
         std::fs::set_permissions(&dest, std::fs::Permissions::from_mode(0o755))
             .map_err(|e| e.to_string())?;
     }
-    // Entrada en el menú de aplicaciones.
     let exec = if sys.fuse {
         format!("\"{}\" %F", dest.display())
     } else {
         format!("env APPIMAGE_EXTRACT_AND_RUN=1 \"{}\" %F", dest.display())
     };
+    write_desktop(app, &exec);
+    Ok(Some(dest))
+}
+
+/// Entrada en el menú de aplicaciones del usuario.
+fn write_desktop(app: &AppDef, exec: &str) {
     let desktop = format!(
         "[Desktop Entry]\nType=Application\nName={}\nComment={}\nExec={exec}\nIcon=application-x-executable\nTerminal=false\nCategories=Office;\nX-Iureapps=true\n",
         app.name, app.description
@@ -322,7 +350,70 @@ fn install_appimage(
         let _ = std::fs::create_dir_all(d);
     }
     let _ = std::fs::write(df, desktop);
-    Ok(Some(dest))
+}
+
+/// Carpeta de una app instalada desde `.tar.gz`.
+fn tarball_dir(app: &AppDef) -> PathBuf {
+    util::data_dir().join("apps").join(app.id)
+}
+
+/// Borra la carpeta del `.tar.gz` si `bin` está dentro de la del lanzador (nunca otra cosa).
+fn remove_tarball_dir(app: &AppDef, bin: &Path) -> bool {
+    let dir = tarball_dir(app);
+    bin.starts_with(&dir) && std::fs::remove_dir_all(&dir).is_ok()
+}
+
+/// Descomprime los binarios en `~/.local/share/iureapps/apps/<id>/` y devuelve el principal.
+fn install_tarball(app: &AppDef, file: &Path) -> Result<PathBuf, String> {
+    let tmp = util::data_dir().join("tmp").join(app.id);
+    let _ = std::fs::remove_dir_all(&tmp);
+    std::fs::create_dir_all(&tmp).map_err(|e| e.to_string())?;
+    let result = (|| {
+        run(
+            "tar",
+            &[
+                "-xzf",
+                &file.to_string_lossy(),
+                "-C",
+                &tmp.to_string_lossy(),
+                "--no-same-owner",
+            ],
+        )?;
+        // `cargo xtask dist` mete todo en una carpeta `<app>-<versión>-<plataforma>/`.
+        let entries: Vec<PathBuf> = std::fs::read_dir(&tmp)
+            .map_err(|e| e.to_string())?
+            .flatten()
+            .map(|e| e.path())
+            .collect();
+        let root = match entries.as_slice() {
+            [only] if only.is_dir() => only.clone(),
+            _ => tmp.clone(),
+        };
+        let bin_name = app.linux_bins.first().copied().unwrap_or(app.id);
+        if !root.join(bin_name).is_file() {
+            return Err(format!("el archivo no contiene el programa {bin_name}"));
+        }
+        let dest = tarball_dir(app);
+        if dest.exists() {
+            std::fs::remove_dir_all(&dest)
+                .map_err(|e| format!("no se pudo reemplazar {}: {e}", dest.display()))?;
+        }
+        if let Some(parent) = dest.parent() {
+            std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+        }
+        std::fs::rename(&root, &dest).map_err(|e| format!("{}: {e}", dest.display()))?;
+        let bin = dest.join(bin_name);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&bin, std::fs::Permissions::from_mode(0o755))
+                .map_err(|e| e.to_string())?;
+        }
+        write_desktop(app, &format!("\"{}\" %F", bin.display()));
+        Ok(bin)
+    })();
+    let _ = std::fs::remove_dir_all(&tmp);
+    result
 }
 
 fn desktop_file(app: &AppDef) -> PathBuf {
@@ -386,25 +477,11 @@ fn install_windows(file: &Path) -> Result<(), String> {
     ps_run_wait(&file.to_string_lossy(), "/S")
 }
 
+/// Instala la `.app` de un `.app.tar.gz` (Tauri) o de un `.dmg` (cargo-packager).
 fn install_mac(app: &AppDef, file: &Path) -> Result<PathBuf, String> {
     let tmp = util::data_dir().join("tmp").join(app.id);
     let _ = std::fs::remove_dir_all(&tmp);
     std::fs::create_dir_all(&tmp).map_err(|e| e.to_string())?;
-    run(
-        "tar",
-        &[
-            "-xzf",
-            &file.to_string_lossy(),
-            "-C",
-            &tmp.to_string_lossy(),
-        ],
-    )?;
-    let bundle = std::fs::read_dir(&tmp)
-        .map_err(|e| e.to_string())?
-        .flatten()
-        .map(|e| e.path())
-        .find(|p| p.extension().is_some_and(|x| x == "app"))
-        .ok_or("el archivo no contiene una .app")?;
     // /Applications si se puede escribir; si no, ~/Applications.
     let dir = mac_app_dirs()
         .into_iter()
@@ -417,19 +494,81 @@ fn install_mac(app: &AppDef, file: &Path) -> Result<PathBuf, String> {
         })
         .ok_or("no hay carpeta de Aplicaciones con permiso de escritura")?;
     let dest = dir.join(format!("{}.app", app.name));
-    if dest.exists() {
-        std::fs::remove_dir_all(&dest)
-            .map_err(|e| format!("no se pudo reemplazar {}: {e}", dest.display()))?;
-    }
-    if std::fs::rename(&bundle, &dest).is_err() {
-        run("mv", &[&bundle.to_string_lossy(), &dest.to_string_lossy()])?;
-    }
+    let result = if file.extension().is_some_and(|x| x == "dmg") {
+        install_mac_dmg(file, &tmp, &dest)
+    } else {
+        install_mac_tar(file, &tmp, &dest)
+    };
+    let _ = std::fs::remove_dir_all(&tmp);
+    result?;
     let _ = run(
         "xattr",
         &["-dr", "com.apple.quarantine", &dest.to_string_lossy()],
     );
-    let _ = std::fs::remove_dir_all(&tmp);
     Ok(dest)
+}
+
+fn find_app_bundle(dir: &Path) -> Result<PathBuf, String> {
+    std::fs::read_dir(dir)
+        .map_err(|e| e.to_string())?
+        .flatten()
+        .map(|e| e.path())
+        .find(|p| p.extension().is_some_and(|x| x == "app"))
+        .ok_or_else(|| "el archivo no contiene una .app".into())
+}
+
+fn replace_app(dest: &Path) -> Result<(), String> {
+    if dest.exists() {
+        std::fs::remove_dir_all(dest)
+            .map_err(|e| format!("no se pudo reemplazar {}: {e}", dest.display()))?;
+    }
+    Ok(())
+}
+
+fn install_mac_tar(file: &Path, tmp: &Path, dest: &Path) -> Result<(), String> {
+    run(
+        "tar",
+        &[
+            "-xzf",
+            &file.to_string_lossy(),
+            "-C",
+            &tmp.to_string_lossy(),
+        ],
+    )?;
+    let bundle = find_app_bundle(tmp)?;
+    replace_app(dest)?;
+    if std::fs::rename(&bundle, dest).is_err() {
+        run("mv", &[&bundle.to_string_lossy(), &dest.to_string_lossy()])?;
+    }
+    Ok(())
+}
+
+/// Monta el `.dmg` sin abrir Finder, copia la `.app` con `ditto` y lo desmonta.
+fn install_mac_dmg(file: &Path, tmp: &Path, dest: &Path) -> Result<(), String> {
+    let mnt = tmp.join("dmg");
+    std::fs::create_dir_all(&mnt).map_err(|e| e.to_string())?;
+    let mnt_s = mnt.to_string_lossy();
+    run(
+        "hdiutil",
+        &[
+            "attach",
+            "-nobrowse",
+            "-readonly",
+            "-noautoopen",
+            "-mountpoint",
+            &mnt_s,
+            &file.to_string_lossy(),
+        ],
+    )?;
+    let copied = find_app_bundle(&mnt).and_then(|bundle| {
+        replace_app(dest)?;
+        run(
+            "ditto",
+            &[&bundle.to_string_lossy(), &dest.to_string_lossy()],
+        )
+    });
+    let _ = run("hdiutil", &["detach", &mnt_s, "-force"]);
+    copied
 }
 
 pub fn uninstall(app: &AppDef, installed: &Installed) -> Result<(), String> {
@@ -441,6 +580,13 @@ pub fn uninstall(app: &AppDef, installed: &Installed) -> Result<(), String> {
         }
         (Format::MacApp, Launch::MacApp(p)) => {
             std::fs::remove_dir_all(p).map_err(|e| e.to_string())
+        }
+        (Format::TarGz, Launch::Exec(p)) => {
+            if !remove_tarball_dir(app, p) {
+                return Err(format!("no se pudo quitar {}", tarball_dir(app).display()));
+            }
+            let _ = std::fs::remove_file(desktop_file(app));
+            Ok(())
         }
         (Format::Deb, _) => {
             let pkg = installed
@@ -481,6 +627,51 @@ pub fn uninstall(app: &AppDef, installed: &Installed) -> Result<(), String> {
 mod tests {
     use super::*;
     use crate::github::Asset;
+
+    /// El `.tar.gz` de `cargo xtask dist` (carpeta `<app>-<ver>-x86_64-linux/` con los binarios).
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn installs_and_removes_tarball() {
+        let base = std::env::temp_dir().join(format!("iureapps-tgz-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        std::env::set_var("XDG_DATA_HOME", base.join("data"));
+        let src = base.join("src/iureproject-0.2.0-x86_64-linux");
+        std::fs::create_dir_all(&src).unwrap();
+        std::fs::write(src.join("iureproject"), "#!/bin/sh\n").unwrap();
+        std::fs::write(src.join("iureproject-cli"), "#!/bin/sh\n").unwrap();
+        let file = base.join("iureproject-0.2.0-x86_64-linux.tar.gz");
+        run(
+            "tar",
+            &[
+                "-czf",
+                &file.to_string_lossy(),
+                "-C",
+                &base.join("src").to_string_lossy(),
+                "iureproject-0.2.0-x86_64-linux",
+            ],
+        )
+        .unwrap();
+
+        let app = crate::catalog::find("iureproject").unwrap();
+        let bin = install_tarball(app, &file).unwrap();
+        assert_eq!(bin, util::data_dir().join("apps/iureproject/iureproject"));
+        assert!(bin.with_file_name("iureproject-cli").exists());
+        let desktop = std::fs::read_to_string(desktop_file(app)).unwrap();
+        assert!(desktop.contains(&bin.display().to_string()));
+        // Reinstalar reemplaza la carpeta.
+        install_tarball(app, &file).unwrap();
+
+        let installed = Installed {
+            version: Some("0.2.0".into()),
+            format: Format::TarGz,
+            variant: None,
+            launch: Launch::Exec(bin.clone()),
+            uninstall: None,
+        };
+        uninstall(app, &installed).unwrap();
+        assert!(!bin.exists() && !desktop_file(app).exists());
+        let _ = std::fs::remove_dir_all(&base);
+    }
 
     /// Descarga real desde GitHub: `cargo test -- --ignored installs_real_appimage`.
     #[test]

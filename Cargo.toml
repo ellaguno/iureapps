@@ -1,6 +1,6 @@
 [package]
 name = "iureapps"
-version = "0.1.4"
+version = "0.1.5"
 edition = "2021"
 description = "Lanzador e instalador ligero de las apps de escritorio de Iurefficient"
 license = "MIT"
@@ -17,11 +17,16 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 minisign-verify = "0.3"
 base64 = "0.22"
+sha2 = "0.10"
 png = "0.18"
 # Cuenta compartida con las demás apps (mismo llavero y «cuenta activa»).
 iurefficient-connect = { git = "https://github.com/ellaguno/iurefficient-connect", tag = "v0.7.1" }
 tokio = { version = "1", features = ["rt"] }
 anyhow = "1"
+
+[build-dependencies]
+# Sólo al compilar: pasa los SVG de marca a PNG (ver build.rs).
+resvg = { version = "0.45", default-features = false }
 
 [profile.release]
 opt-level = "s"
@@ -39,8 +44,8 @@ priority = "optional"
 depends = "$auto, libxkbcommon-x11-0, libgl1, libegl1"
 recommends = "policykit-1 | pkexec, gnome-keyring | kwalletmanager"
 extended-description = """\
-Instala, actualiza y abre iureditor, IureTranscribe, IureOCR, IureDav, IureVoz e \
-IureProject desde sus releases de GitHub, escogiendo la versión adecuada para el \
+Instala, actualiza y abre iureditor, IureTranscribe, IureOCR, IureDav, IureVoz, \
+IureDesk e IureProject desde sus releases de GitHub, escogiendo la versión adecuada para el \
 equipo (CPU, CUDA o Vulkan), y configura una sola vez la cuenta de Iurefficient \
 que comparten todas."""
 assets = [

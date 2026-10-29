@@ -123,14 +123,22 @@ pub fn install(ctx: &egui::Context) {
     });
 }
 
-/// Iconos de las apps que publican uno; el resto se dibuja con [`paint_drawn_icon`].
+/// Iconos de las apps que publican uno (el resto se dibuja con [`paint_drawn_icon`]) y la
+/// marca de Iurefficient (icono y logotipo, rasterizados de `assets/brand` por `build.rs`).
 pub struct Icons {
     textures: HashMap<&'static str, TextureHandle>,
+    logo: Option<TextureHandle>,
 }
+
+/// Con mipmaps: la marca se dibuja bastante más pequeña que su PNG y así no se ve dentada.
+const SHARP_DOWNSCALE: TextureOptions = TextureOptions {
+    mipmap_mode: Some(egui::TextureFilter::Linear),
+    ..TextureOptions::LINEAR
+};
 
 impl Icons {
     pub fn load(ctx: &egui::Context) -> Self {
-        let files: [(&'static str, &'static [u8]); 4] = [
+        let files: [(&'static str, &'static [u8]); 6] = [
             (
                 "iureditor",
                 include_bytes!("../../assets/icons/iureditor.png"),
@@ -141,24 +149,52 @@ impl Icons {
             ),
             ("iureocr", include_bytes!("../../assets/icons/iureocr.png")),
             ("iuredav", include_bytes!("../../assets/icons/iuredav.png")),
+            (
+                "iuredesk",
+                include_bytes!("../../assets/icons/iuredesk.png"),
+            ),
+            (
+                "iurefficient",
+                include_bytes!(concat!(env!("OUT_DIR"), "/icono.png")),
+            ),
         ];
         let textures = files
             .into_iter()
             .filter_map(|(id, bytes)| {
                 let img = decode_png(bytes)?;
-                Some((id, ctx.load_texture(id, img, TextureOptions::LINEAR)))
+                Some((id, ctx.load_texture(id, img, SHARP_DOWNSCALE)))
             })
             .collect();
-        Icons { textures }
+        let logo = decode_png(include_bytes!(concat!(env!("OUT_DIR"), "/logotipo.png")))
+            .map(|img| ctx.load_texture("logotipo", img, SHARP_DOWNSCALE));
+        Icons { textures, logo }
     }
 
     pub fn paint(&self, painter: &Painter, rect: Rect, app_id: &str, accent: Color32) {
+        let uv = Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0));
         match self.textures.get(app_id) {
+            // El icono de Iurefficient es sólo el trazo: va sobre el fondo de la suite.
+            Some(t) if app_id == "iurefficient" => {
+                let s = rect.width();
+                painter.rect_filled(rect, CornerRadius::same((s * 0.22) as u8), BRAND_NAVY);
+                painter.image(t.id(), rect.shrink(s * 0.2), uv, Color32::WHITE);
+            }
             Some(t) => {
-                let uv = Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0));
                 painter.image(t.id(), rect, uv, Color32::WHITE);
             }
             None => paint_drawn_icon(painter, rect, app_id, accent),
+        }
+    }
+
+    /// Logotipo de Iurefficient de `height` puntos de alto (el texto «Iurefficient» si faltara).
+    pub fn logo(&self, ui: &mut egui::Ui, height: f32) -> egui::Response {
+        match &self.logo {
+            Some(t) => {
+                let [w, h] = t.size();
+                let size = vec2(height * w as f32 / h as f32, height);
+                ui.add(egui::Image::new((t.id(), size)))
+            }
+            None => ui.label(egui::RichText::new("Iurefficient").font(bold_font(height))),
         }
     }
 }
@@ -231,30 +267,6 @@ pub fn paint_drawn_icon(painter: &Painter, rect: Rect, app_id: &str, accent: Col
                 let color = if k == 2 { accent } else { white };
                 painter.rect_filled(bar, CornerRadius::same((w / 2.0) as u8), color);
             }
-        }
-        "iurefficient" => {
-            // Cuenta: silueta de persona con un anillo del color de acento.
-            let head = pos2(rect.center().x, base + s * 0.08);
-            painter.circle_filled(head, s * 0.085, white);
-            let body = Rect::from_center_size(
-                pos2(rect.center().x, base + s * 0.29),
-                vec2(s * 0.36, s * 0.17),
-            );
-            painter.rect_filled(
-                body,
-                CornerRadius {
-                    nw: (s * 0.12) as u8,
-                    ne: (s * 0.12) as u8,
-                    sw: 2,
-                    se: 2,
-                },
-                white,
-            );
-            painter.circle_stroke(
-                pos2(rect.center().x, base + s * 0.17),
-                s * 0.27,
-                Stroke::new(s * 0.035, accent),
-            );
         }
         _ => {
             // Diagrama de Gantt: tres barras escalonadas.
