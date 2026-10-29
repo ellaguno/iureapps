@@ -46,6 +46,9 @@ pub struct AppDef {
 
 const KEY_8F1B: &str = "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDhGMUI0OEUxNjg1NjE1MjUKUldRbEZWWm80VWdiajlpRzB5WFRKY0RFZ01VVGN0TVMrV01LQjZWTUNTa3JsV0VoMFRWQTlmbmUK";
 const KEY_E017: &str = "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEUwMTc4NjI1QkY2NjQyQ0IKUldUTFFtYS9KWVlYNEw1ZDQ0VEJNK2pQMGQ2UEJTSWJnZEhyOXZnVUYzWFRURUM5S1RJVmdpbGEK";
+/// Clave de IureDesk (`docs/minisign.pub` de su repo, en base64). No es Tauri: firma con
+/// `cargo xtask sign`, en el mismo formato.
+const KEY_3B1C: &str = "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDNCMUM1M0Q1OUUxMjk0OTEKUldTUmxCS2UxVk1jTzQydXdwNGpjS0NrNnV6SkpiOEYveTg2Nm9QV05GVlE5TTlrR0RFeVdFc1AK";
 const ALL: &[Os] = &[Os::Linux, Os::Windows, Os::MacOs];
 
 pub static APPS: &[AppDef] = &[
@@ -135,18 +138,22 @@ pub static APPS: &[AppDef] = &[
     AppDef {
         id: "iuredesk",
         name: "IureDesk",
-        repo: "ellaguno/iuredesk-releases",
-        description: "Correo, calendario, contactos, notas y tareas, integrado con Iurefficient.",
+        // Código abierto: los releases están en el propio repo (ya no en iuredesk-releases).
+        repo: "ellaguno/iuredesk",
+        description: "Correo, calendario, contactos, notas y tareas; integrado con Iurefficient.",
         tagline: "Correo y agenda",
-        hint: "Correo, calendario, contactos y tareas",
-        accent: [14, 165, 233],
+        hint: "Reemplaza Outlook, Thunderbird y Apple Mail",
+        // Azul del logotipo de Iurefficient (`iurefficient-ui`, `tokens::brand::BLUE`).
+        accent: [6, 80, 236],
         experimental: true,
-        packaging: Packaging::Packager,
+        // Rust puro (cargo-packager), pero publica con el esquema de nombres de Tauri y firma
+        // minisign (`cargo xtask package` y `cargo xtask sign` de IureDesk).
+        packaging: Packaging::Tauri,
         oses: ALL,
         gpu_variants: false,
         linux_bins: &["iuredesk"],
-        pubkey: None,
-        note: "Versión de prueba.",
+        pubkey: Some(KEY_3B1C),
+        note: "Versión alfa.",
     },
     AppDef {
         id: "iureproject",
@@ -630,15 +637,65 @@ mod tests {
         .is_none());
     }
 
+    /// Nombres que publica `cargo xtask package` de IureDesk (esquema de Tauri).
+    #[test]
+    fn picks_iuredesk() {
+        let r = release(
+            "IureDesk",
+            "0.1.0-alpha.1",
+            &[
+                "-linux-x64.AppImage",
+                "-linux-x64.deb",
+                "-windows-x64.exe",
+                "-macos-arm64.app.tar.gz",
+                "-macos-arm64.dmg",
+                "-macos-x64.app.tar.gz",
+            ],
+        );
+        let n = |os, arch, f| pick("iuredesk", &r, &sys(os, arch), Variant::Cpu, f);
+        let v = "IureDesk_0.1.0-alpha.1_";
+        assert_eq!(
+            n(Os::Linux, Arch::X64, Format::AppImage).unwrap(),
+            format!("{v}-linux-x64.AppImage")
+        );
+        assert_eq!(
+            n(Os::Linux, Arch::X64, Format::Deb).unwrap(),
+            format!("{v}-linux-x64.deb")
+        );
+        assert_eq!(
+            n(Os::Windows, Arch::X64, Format::WinExe).unwrap(),
+            format!("{v}-windows-x64.exe")
+        );
+        assert_eq!(
+            n(Os::MacOs, Arch::Arm64, Format::MacApp).unwrap(),
+            format!("{v}-macos-arm64.app.tar.gz")
+        );
+        assert_eq!(
+            n(Os::MacOs, Arch::X64, Format::MacApp).unwrap(),
+            format!("{v}-macos-x64.app.tar.gz")
+        );
+        let app = find("iuredesk").unwrap();
+        let (_, sig) = app
+            .select_asset(
+                &r,
+                &sys(Os::Linux, Arch::X64),
+                Variant::Cpu,
+                Format::AppImage,
+            )
+            .unwrap();
+        assert_eq!(sig.unwrap().name, format!("{v}-linux-x64.AppImage.sig"));
+        assert!(app.pubkey.is_some());
+    }
+
     #[test]
     fn picks_packager_assets() {
         let names = [
-            "iuredesk-0.3.0-x86_64-linux.tar.gz",
-            "iuredesk_0.3.0_amd64.deb",
-            "iuredesk_0.3.0_x86_64.AppImage",
-            "iuredesk_0.3.0_x64-setup.exe",
-            "IureDesk_0.3.0_aarch64.dmg",
-            "IureDesk_0.3.0_x64.dmg",
+            "iureproject-0.3.0-x86_64-linux.tar.gz",
+            "iureproject_0.3.0_amd64.deb",
+            "iureproject_0.3.0_x86_64.AppImage",
+            "iureproject_0.3.0_x64-setup.exe",
+            "IureProject_0.3.0_aarch64.dmg",
+            "IureProject_0.3.0_x64.dmg",
             "SHA256SUMS",
         ];
         let r = Release {
@@ -657,28 +714,34 @@ mod tests {
                 .collect(),
         };
         let linux = sys(Os::Linux, Arch::X64);
-        let p = |s: &SystemInfo, f| pick("iuredesk", &r, s, Variant::Cpu, f);
+        let p = |s: &SystemInfo, f| pick("iureproject", &r, s, Variant::Cpu, f);
         assert_eq!(
             p(&linux, Format::AppImage).unwrap(),
-            "iuredesk_0.3.0_x86_64.AppImage"
+            "iureproject_0.3.0_x86_64.AppImage"
         );
-        assert_eq!(p(&linux, Format::Deb).unwrap(), "iuredesk_0.3.0_amd64.deb");
+        assert_eq!(
+            p(&linux, Format::Deb).unwrap(),
+            "iureproject_0.3.0_amd64.deb"
+        );
         assert!(p(&linux, Format::Rpm).is_none());
         let win = sys(Os::Windows, Arch::Arm64);
         assert_eq!(
             p(&win, Format::WinExe).unwrap(),
-            "iuredesk_0.3.0_x64-setup.exe"
+            "iureproject_0.3.0_x64-setup.exe"
         );
         let mac = sys(Os::MacOs, Arch::Arm64);
         assert_eq!(
             p(&mac, Format::MacApp).unwrap(),
-            "IureDesk_0.3.0_aarch64.dmg"
+            "IureProject_0.3.0_aarch64.dmg"
         );
         let mac = sys(Os::MacOs, Arch::X64);
-        assert_eq!(p(&mac, Format::MacApp).unwrap(), "IureDesk_0.3.0_x64.dmg");
+        assert_eq!(
+            p(&mac, Format::MacApp).unwrap(),
+            "IureProject_0.3.0_x64.dmg"
+        );
         assert_eq!(
             p(&linux, Format::TarGz).unwrap(),
-            "iuredesk-0.3.0-x86_64-linux.tar.gz"
+            "iureproject-0.3.0-x86_64-linux.tar.gz"
         );
         // IureProject sólo publica el .tar.gz de `cargo xtask dist`.
         let mut r = r.clone();

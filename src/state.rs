@@ -62,8 +62,50 @@ impl State {
     }
 }
 
-/// Compara versiones `1.2.3` (ignora una `v` inicial y sufijos como `-1` de Debian).
+/// Compara versiones `1.2.3` (ignora una `v` inicial y sufijos como `-1` de Debian). Un sufijo
+/// que empieza con letra es de versión preliminar (semver): `0.1.0-alpha.2` > `0.1.0-alpha.1`
+/// y `0.1.0` > `0.1.0-alpha.2`.
 pub fn version_cmp(a: &str, b: &str) -> std::cmp::Ordering {
+    core_cmp(a, b).then_with(|| pre_cmp(pre(a), pre(b)))
+}
+
+/// Identificadores de la parte preliminar (`alpha.1` → `["alpha", "1"]`), si la hay.
+fn pre(v: &str) -> Option<Vec<&str>> {
+    let v = v.trim().trim_start_matches('v');
+    let rest = v.trim_start_matches(|c: char| c.is_ascii_digit() || c == '.');
+    let rest = rest.strip_prefix('-')?;
+    // Sin letra al principio es la revisión de Debian/RPM (`-1`), no una preliminar.
+    if !rest.starts_with(|c: char| c.is_ascii_alphabetic()) {
+        return None;
+    }
+    let rest = rest.split('+').next().unwrap_or(rest);
+    Some(rest.split(['.', '-']).filter(|s| !s.is_empty()).collect())
+}
+
+fn pre_cmp(a: Option<Vec<&str>>, b: Option<Vec<&str>>) -> std::cmp::Ordering {
+    use std::cmp::Ordering::*;
+    match (a, b) {
+        (None, None) => Equal,
+        (None, Some(_)) => Greater,
+        (Some(_), None) => Less,
+        (Some(a), Some(b)) => {
+            for (x, y) in a.iter().zip(b.iter()) {
+                let o = match (x.parse::<u64>(), y.parse::<u64>()) {
+                    (Ok(x), Ok(y)) => x.cmp(&y),
+                    (Ok(_), Err(_)) => Less,
+                    (Err(_), Ok(_)) => Greater,
+                    _ => x.cmp(y),
+                };
+                if o != Equal {
+                    return o;
+                }
+            }
+            a.len().cmp(&b.len())
+        }
+    }
+}
+
+fn core_cmp(a: &str, b: &str) -> std::cmp::Ordering {
     fn parts(v: &str) -> Vec<u64> {
         let v = v.trim().trim_start_matches('v');
         let core: String = v
@@ -93,5 +135,18 @@ mod tests {
         assert_eq!(version_cmp("0.2.1-1", "0.2.1"), Equal);
         assert_eq!(version_cmp("0.8.2", "0.10.0"), Less);
         assert_eq!(version_cmp("1.0", "0.9.9"), Greater);
+    }
+
+    #[test]
+    fn compares_prereleases() {
+        assert_eq!(version_cmp("0.1.0-alpha.1", "0.1.0-alpha.2"), Less);
+        assert_eq!(version_cmp("v0.1.0-alpha.2", "0.1.0-alpha.2"), Equal);
+        assert_eq!(version_cmp("0.1.0-alpha.10", "0.1.0-alpha.9"), Greater);
+        assert_eq!(version_cmp("0.1.0-beta.1", "0.1.0-alpha.3"), Greater);
+        assert_eq!(version_cmp("0.1.0", "0.1.0-alpha.3"), Greater);
+        assert_eq!(version_cmp("0.1.0-alpha.3", "0.1.1"), Less);
+        assert_eq!(version_cmp("0.1.0-alpha", "0.1.0-alpha.1"), Less);
+        // La revisión de Debian sigue sin contar.
+        assert_eq!(version_cmp("0.2.1-1", "0.2.1"), Equal);
     }
 }

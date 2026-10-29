@@ -67,6 +67,26 @@ pub fn verify_sha256(sums: &str, name: &str, file: &std::path::Path) -> Result<(
 
 #[cfg(test)]
 mod tests {
+    /// Firma hecha con `cargo xtask sign` de IureDesk (su clave real) sobre `DATA`.
+    const DATA: &[u8] = b"IureDesk: prueba de firma para iureapps\n";
+    const SIG: &str = "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIEl1cmVEZXNrIHNlY3JldCBrZXkKUlVTUmxCS2UxVk1jT3hITWhqMHZnb2dCNEFRVDlGQjdTTzBUd1IwWE5yT2M3SlBZSnJyOXNuaFIvNGJOY1NPRWFld2V6TTV1TDhlaUhqVGMzVm1GdE1sSTJKQ2NwalVDNFFFPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkzMzAxMTYyCWZpbGU6Zml4dHVyZS50eHQKMDk1aWJJYlB0ajdScFRvVURzODY1Q2lFRjFXT1hLN1FrZnNHRVlFMGNpVjMzRHR1R3NMNjNLemdNVzJSR0VjWXZuWHpGeWJ5TENaSlVUNW1MUHd2Qnc9PQo=";
+
+    #[test]
+    fn verifies_iuredesk_signature() {
+        let key = crate::catalog::find("iuredesk").unwrap().pubkey.unwrap();
+        let dir = std::env::temp_dir().join(format!("iureapps-verify-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let ok = dir.join("ok.txt");
+        std::fs::write(&ok, DATA).unwrap();
+        assert!(super::verify_file(key, SIG, &ok).is_ok());
+        let bad = dir.join("bad.txt");
+        std::fs::write(&bad, b"IureDesk: alterado\n").unwrap();
+        assert!(super::verify_file(key, SIG, &bad).is_err());
+        // Con la clave de otra app no verifica.
+        let other = crate::catalog::find("iureditor").unwrap().pubkey.unwrap();
+        assert!(super::verify_file(other, SIG, &ok).is_err());
+    }
+
     #[test]
     fn checks_sha256sums() {
         let dir = std::env::temp_dir().join(format!("iureapps-sha-{}", std::process::id()));

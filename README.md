@@ -60,8 +60,9 @@ iureapps iurefficient         # abre la instancia en el navegador
 iureapps desconectar
 ```
 
-IureDesk e IureProject publican sus instaladores en repos de descargas públicos
-(`ellaguno/iuredesk-releases`, `ellaguno/iureproject-releases`). IureVoz está en un repo
+IureDesk publica sus instaladores (firmados con minisign) en su propio repo,
+`ellaguno/iuredesk`; IureProject, en el repo de descargas público
+`ellaguno/iureproject-releases`. IureVoz está en un repo
 privado: configura un token de GitHub de sólo lectura en *Ajustes* o con la variable
 `IUREAPPS_GITHUB_TOKEN`. El token también sube el límite de la
 API de 60 a 5000 consultas por hora.
