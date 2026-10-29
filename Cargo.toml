@@ -1,6 +1,6 @@
 [package]
 name = "iureapps"
-version = "0.1.3"
+version = "0.1.4"
 edition = "2021"
 description = "Lanzador e instalador ligero de las apps de escritorio de Iurefficient"
 license = "MIT"
