@@ -92,6 +92,47 @@ fn press_button(
     }
 }
 
+/// Enlace en mayúsculas: se ilumina y subraya al pasar el ratón, con cursor de mano, y al
+/// pulsarlo se hunde y queda un momento en azul, porque el navegador tarda en aparecer.
+fn link_label(ui: &mut Ui, text: &str, size: f32) -> egui::Response {
+    const FLASH: f64 = 0.8;
+    let galley = ui.fonts_mut(|f| f.layout_job(caps(text, size, MUTED)));
+    let (rect, resp) = ui.allocate_exact_size(galley.size(), Sense::click());
+    let now = ui.input(|i| i.time);
+    let flash_id = resp.id.with("link-flash");
+    if resp.clicked() {
+        ui.data_mut(|d| d.insert_temp(flash_id, now));
+    }
+    let flashing = ui
+        .data(|d| d.get_temp::<f64>(flash_id))
+        .is_some_and(|t| now - t < FLASH);
+    if flashing {
+        ui.ctx()
+            .request_repaint_after(std::time::Duration::from_millis(100));
+    }
+    if ui.is_rect_visible(rect) {
+        let pressed = resp.is_pointer_button_down_on();
+        let color = if pressed || flashing {
+            INFO
+        } else if resp.hovered() {
+            TEXT
+        } else {
+            MUTED
+        };
+        let r = if pressed {
+            rect.translate(vec2(0.0, 1.0))
+        } else {
+            rect
+        };
+        if resp.hovered() || pressed || flashing {
+            ui.painter()
+                .hline(r.x_range(), r.bottom() + 1.0, Stroke::new(1.0, color));
+        }
+        ui.painter().galley(r.min, galley, color);
+    }
+    resp.on_hover_cursor(egui::CursorIcon::PointingHand)
+}
+
 /// Botón plano con texto en mayúsculas; `fill` da el botón principal (fondo claro).
 fn flat_button(ui: &mut Ui, text: &str, fill: Option<Color32>, min: egui::Vec2) -> egui::Response {
     let fg = if fill.is_some() { BG } else { TEXT };
@@ -313,13 +354,7 @@ impl LauncherApp {
                         if flat_button(ui, "Descargar", Some(TEXT), vec2(110.0, 30.0)).clicked() {
                             super::open_link(&r.html_url);
                         }
-                        if ui
-                            .add(
-                                egui::Label::new(caps("Novedades ↗", 10.5, MUTED))
-                                    .sense(Sense::click()),
-                            )
-                            .clicked()
-                        {
+                        if link_label(ui, "Novedades ↗", 10.5).clicked() {
                             super::open_link(&r.html_url);
                         }
                     });
@@ -519,8 +554,7 @@ impl LauncherApp {
                 .layout(Layout::right_to_left(Align::Center)),
             |ui| {
                 let gh = "https://github.com/ellaguno/iurefficient-connect";
-                if ui
-                    .add(egui::Label::new(caps("Conector ↗", 10.5, MUTED)).sense(Sense::click()))
+                if link_label(ui, "Conector ↗", 10.5)
                     .on_hover_text(gh)
                     .clicked()
                 {
@@ -528,11 +562,7 @@ impl LauncherApp {
                 }
                 if let Some(s) = &saved {
                     ui.add_space(10.0);
-                    if ui
-                        .add(
-                            egui::Label::new(caps("Instancia ↗", 10.5, MUTED))
-                                .sense(Sense::click()),
-                        )
+                    if link_label(ui, "Instancia ↗", 10.5)
                         .on_hover_text(&s.web_url)
                         .clicked()
                     {
@@ -860,8 +890,7 @@ impl LauncherApp {
                 .layout(Layout::right_to_left(Align::Center)),
             |ui| {
                 let gh = format!("https://github.com/{}", app.repo);
-                if ui
-                    .add(egui::Label::new(caps("GitHub ↗", 10.5, MUTED)).sense(Sense::click()))
+                if link_label(ui, "GitHub ↗", 10.5)
                     .on_hover_text(&gh)
                     .clicked()
                 {
@@ -876,8 +905,7 @@ impl LauncherApp {
                     .as_ref()
                     .and_then(|r| r.body.clone())
                     .unwrap_or_default();
-                let link = ui
-                    .add(egui::Label::new(caps("Novedades ↗", 10.5, MUTED)).sense(Sense::click()));
+                let link = link_label(ui, "Novedades ↗", 10.5);
                 let link = if notes.trim().is_empty() {
                     link
                 } else {
@@ -1303,10 +1331,7 @@ impl LauncherApp {
             caps_label(ui, &format!("{checked}{source}"), 10.0, FAINT);
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                 let label = format!("Registro ({})", self.log.len());
-                if ui
-                    .add(egui::Label::new(caps(&label, 10.0, MUTED)).sense(Sense::click()))
-                    .clicked()
-                {
+                if link_label(ui, &label, 10.0).clicked() {
                     self.show_log = !self.show_log;
                 }
                 ui.add_space(14.0);
