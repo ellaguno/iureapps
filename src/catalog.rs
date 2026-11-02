@@ -163,13 +163,15 @@ pub static APPS: &[AppDef] = &[
         tagline: "Gestión de proyectos",
         hint: "Compatible con archivos de MS Project",
         accent: [34, 197, 94],
-        experimental: true,
+        experimental: false,
         packaging: Packaging::Packager,
+        // Windows y macOS publican .zip (aún sin instalador .exe/.dmg): se agregan aquí cuando
+        // los haya.
         oses: &[Os::Linux],
         gpu_variants: false,
         linux_bins: &["iureproject"],
         pubkey: None,
-        note: "En desarrollo. Sólo Linux x64 (binario .tar.gz).",
+        note: "Versión alfa. Linux x64 (.deb o .tar.gz); Windows y macOS, en su página de descargas.",
     },
 ];
 
