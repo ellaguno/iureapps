@@ -171,7 +171,8 @@ pub static APPS: &[AppDef] = &[
         gpu_variants: false,
         linux_bins: &["iureproject"],
         pubkey: None,
-        note: "Versión alfa. Linux x64 (.deb o .tar.gz); Windows y macOS, en su página de descargas.",
+        note:
+            "Versión alfa. Linux x64 (.deb o .tar.gz); Windows y macOS, en su página de descargas.",
     },
 ];
 
