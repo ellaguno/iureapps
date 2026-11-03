@@ -505,7 +505,7 @@ impl LauncherApp {
     fn settings_window(&mut self, ctx: &egui::Context) {
         let mut open = self.show_settings;
         egui::Window::new("Ajustes").open(&mut open).resizable(false).show(ctx, |ui| {
-            ui.label("Token de GitHub (sólo para repos privados como IureVoz o IureProject):");
+            ui.label("Token de GitHub (sólo para repos privados):");
             ui.add(egui::TextEdit::singleline(&mut self.token_input).password(true).desired_width(320.0));
             ui.label(RichText::new("Basta un token de sólo lectura (Contents: read). Se guarda en el archivo de estado.").small());
             if ui.button("Guardar y volver a consultar").clicked() {
