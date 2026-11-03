@@ -103,6 +103,9 @@ fn cuda_hint(app: &AppDef) -> Option<Variant> {
 }
 
 fn detect_windows(app: &AppDef) -> Option<Installed> {
+    if let Some(found) = detect_suite_msi(app) {
+        return Some(found);
+    }
     let key = format!(
         r"Software\Microsoft\Windows\CurrentVersion\Uninstall\{}",
         app.name
@@ -137,6 +140,48 @@ fn detect_windows(app: &AppDef) -> Option<Installed> {
         launch: Launch::Exec(PathBuf::from(exe)),
         uninstall: get("QuietUninstallString").or_else(|| get("UninstallString")),
     })
+}
+
+/// Un `.msi` de la suite (IureProject): Windows muestra su `ProductVersion` (`0.2.15`), no la
+/// versión, así que el instalador deja la de verdad, la carpeta y el `ProductCode` en
+/// `HKLM\Software\Iurefficient\<App>`.
+fn detect_suite_msi(app: &AppDef) -> Option<Installed> {
+    let entry = reg_query(&format!(r"HKLM\Software\Iurefficient\{}", app.name))?;
+    let get = |k: &str| {
+        entry
+            .iter()
+            .find(|(n, _)| n.eq_ignore_ascii_case(k))
+            .map(|(_, v)| v.trim().to_string())
+            .filter(|v| !v.is_empty())
+    };
+    let code = get("ProductCode").filter(|c| is_guid(c))?;
+    let bin = app.linux_bins.first()?;
+    let exe = PathBuf::from(get("InstallDir")?).join(format!("{bin}.exe"));
+    if !exe.exists() {
+        return None;
+    }
+    Some(Installed {
+        version: get("Version"),
+        format: Format::Msi,
+        variant: None,
+        launch: Launch::Exec(exe),
+        uninstall: Some(code),
+    })
+}
+
+/// `{XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX}` (lo que acepta `msiexec /x`; viene del registro).
+fn is_guid(s: &str) -> bool {
+    let b = s.as_bytes();
+    b.len() == 38
+        && b.first() == Some(&b'{')
+        && b.last() == Some(&b'}')
+        && b.iter().enumerate().skip(1).take(36).all(|(i, c)| {
+            if matches!(i, 9 | 14 | 19 | 24) {
+                *c == b'-'
+            } else {
+                c.is_ascii_hexdigit()
+            }
+        })
 }
 
 /// Valores de una clave del registro como pares (nombre, valor).
@@ -283,6 +328,7 @@ pub fn install(
         Format::Deb => install_deb(&file).map(|_| None),
         Format::Rpm => install_rpm(&file).map(|_| None),
         Format::WinExe => install_windows(app, &file).map(|_| None),
+        Format::Msi => install_msi(&file).map(|_| None),
         Format::MacApp => install_mac(app, &file).map(Some),
         Format::TarGz => install_tarball(app, &file).map(Some),
     };
@@ -628,6 +674,13 @@ fn install_windows(app: &AppDef, file: &Path) -> Result<(), String> {
     ps_run_wait(&file.to_string_lossy(), args)
 }
 
+/// `.msi`: `/passive` muestra el progreso y deja que Windows pida la elevación (con `/qn` un
+/// instalador para todos los usuarios fallaría sin ella).
+fn install_msi(file: &Path) -> Result<(), String> {
+    let f = file.to_string_lossy().replace('\'', "''");
+    ps_run_wait("msiexec.exe", &format!("/i \"{f}\" /passive /norestart"))
+}
+
 /// Instala la `.app` de un `.app.tar.gz` (Tauri) o de un `.dmg` (cargo-packager).
 fn install_mac(app: &AppDef, file: &Path) -> Result<PathBuf, String> {
     let tmp = util::data_dir().join("tmp").join(app.id);
@@ -774,6 +827,14 @@ pub fn uninstall(app: &AppDef, installed: &Installed) -> Result<(), String> {
                 .is_some_and(|n| n.to_string_lossy().to_lowercase().starts_with("unins"));
             ps_run_wait(exe, if inno { INNO_SILENT } else { "/S" })
         }
+        (Format::Msi, _) => {
+            let code = installed
+                .uninstall
+                .as_deref()
+                .filter(|c| is_guid(c))
+                .ok_or("no se encontró el código del producto")?;
+            ps_run_wait("msiexec.exe", &format!("/x {code} /passive /norestart"))
+        }
         _ => Err("no se sabe desinstalar este formato".into()),
     }
 }
@@ -782,6 +843,14 @@ pub fn uninstall(app: &AppDef, installed: &Installed) -> Result<(), String> {
 mod tests {
     use super::*;
     use crate::github::Asset;
+
+    #[test]
+    fn product_codes_are_checked() {
+        assert!(is_guid("{98436284-3DDF-71ED-BCCB-9A2D80415492}"));
+        assert!(!is_guid("98436284-3DDF-71ED-BCCB-9A2D80415492"));
+        assert!(!is_guid("{98436284-3DDF-71ED-BCCB-9A2D8041549Z}"));
+        assert!(!is_guid("{x} & del C:\\"));
+    }
 
     #[test]
     fn desktop_entry_names_icon_and_window_class() {

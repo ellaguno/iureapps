@@ -168,14 +168,13 @@ pub static APPS: &[AppDef] = &[
         accent: [34, 197, 94],
         experimental: false,
         packaging: Packaging::Packager,
-        // Windows y macOS publican .zip (aún sin instalador .exe/.dmg): se agregan aquí cuando
-        // los haya.
-        oses: &[Os::Linux],
+        // Windows: el .msi desde la 0.2.0-alpha.15. macOS (.dmg) falta probarlo en un Mac.
+        oses: &[Os::Linux, Os::Windows],
         gpu_variants: false,
         linux_bins: &["iureproject"],
         pubkey: None,
         note:
-            "Versión alfa. Linux x64 (.deb o .tar.gz); Windows y macOS, en su página de descargas.",
+            "Versión alfa. Linux x64 (.deb o .tar.gz) y Windows (.msi); macOS, en su página de descargas.",
     },
 ];
 
@@ -219,6 +218,8 @@ pub enum Format {
     Rpm,
     /// Instalador NSIS de Windows (`.exe`, admite `/S`).
     WinExe,
+    /// Windows Installer (`.msi`), con `msiexec`.
+    Msi,
     /// `.app.tar.gz` de macOS.
     MacApp,
     /// Binarios sueltos en `.tar.gz` (Linux), sin instalador.
@@ -232,6 +233,7 @@ impl Format {
             Format::Deb => ".deb",
             Format::Rpm => ".rpm",
             Format::WinExe => "Instalador .exe",
+            Format::Msi => "Instalador .msi",
             Format::MacApp => ".app",
             Format::TarGz => "Binario .tar.gz",
         }
@@ -242,6 +244,7 @@ impl Format {
             Format::Deb => ".deb",
             Format::Rpm => ".rpm",
             Format::WinExe => ".exe",
+            Format::Msi => ".msi",
             Format::MacApp => ".app.tar.gz",
             Format::TarGz => ".tar.gz",
         }
@@ -252,6 +255,7 @@ impl Format {
             "deb" => Some(Format::Deb),
             "rpm" => Some(Format::Rpm),
             "exe" => Some(Format::WinExe),
+            "msi" => Some(Format::Msi),
             "app" => Some(Format::MacApp),
             "tar.gz" | "targz" | "tar" => Some(Format::TarGz),
             _ => None,
@@ -279,7 +283,7 @@ impl AppDef {
     /// Formatos posibles por orden de preferencia en este sistema.
     pub fn formats(&self, sys: &SystemInfo) -> Vec<Format> {
         match sys.os {
-            Os::Windows => vec![Format::WinExe],
+            Os::Windows => vec![Format::WinExe, Format::Msi],
             Os::MacOs => vec![Format::MacApp],
             Os::Linux => {
                 let mut f = vec![Format::AppImage, Format::Deb, Format::Rpm];
@@ -394,6 +398,8 @@ impl AppDef {
                         &["_arm64-setup.exe", "_x64-setup.exe"]
                     }
                     (Os::Windows, _, Format::WinExe) => &["_x64-setup.exe"],
+                    // El .msi de `cargo xtask dist` de IureProject (x64; Windows ARM lo emula).
+                    (Os::Windows, _, Format::Msi) => &["-x86_64-windows.msi"],
                     (Os::MacOs, Arch::Arm64, Format::MacApp) => &["_aarch64.dmg", "_universal.dmg"],
                     (Os::MacOs, Arch::X64, Format::MacApp) => &["_x64.dmg", "_universal.dmg"],
                     _ => return None,
@@ -750,6 +756,8 @@ mod tests {
             "iureproject_0.3.0_amd64.deb",
             "iureproject_0.3.0_x86_64.AppImage",
             "iureproject_0.3.0_x64-setup.exe",
+            "iureproject-0.3.0-x86_64-windows.msi",
+            "iureproject-0.3.0-x86_64-windows.zip",
             "IureProject_0.3.0_aarch64.dmg",
             "IureProject_0.3.0_x64.dmg",
             "SHA256SUMS",
@@ -785,6 +793,11 @@ mod tests {
             p(&win, Format::WinExe).unwrap(),
             "iureproject_0.3.0_x64-setup.exe"
         );
+        assert_eq!(
+            p(&sys(Os::Windows, Arch::X64), Format::Msi).unwrap(),
+            "iureproject-0.3.0-x86_64-windows.msi"
+        );
+        assert_eq!(Format::parse(".msi"), Some(Format::Msi));
         let mac = sys(Os::MacOs, Arch::Arm64);
         assert_eq!(
             p(&mac, Format::MacApp).unwrap(),
