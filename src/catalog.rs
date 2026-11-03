@@ -11,8 +11,10 @@ use crate::system::{Arch, Os, PkgFamily, SystemInfo, Vendor};
 pub enum Packaging {
     /// Instaladores de Tauri con el esquema de nombres de arriba.
     Tauri,
-    /// Sólo `.deb` hecho con cargo-deb (`<crate>_<ver>-1_amd64.deb`).
-    CargoDeb,
+    /// IureVoz: cargo-deb, cargo-generate-rpm, Inno Setup y WiX con el esquema de nombres de
+    /// Tauri (`IureVoz-<ver>-linux-x64.deb`, `-linux-x64.rpm`, `-windows-x64.exe`) y
+    /// `SHA256SUMS`. El `.exe` es de Inno Setup: se instala con `/VERYSILENT`, no con `/S`.
+    Inno,
     /// Apps en Rust de la suite (`cargo xtask dist` / `package`), con `SHA256SUMS`:
     /// `<bin>-<ver>-x86_64-linux.tar.gz` y, con cargo-packager, `<bin>_<ver>_x86_64.AppImage`,
     /// `<bin>_<ver>_amd64.deb`, `<bin>_<ver>_x64-setup.exe` y `<Producto>_<ver>_<aarch64|x64>.dmg`.
@@ -125,15 +127,16 @@ pub static APPS: &[AppDef] = &[
         repo: "ellaguno/iurevoz",
         description: "Dictado y control del escritorio por voz, local y sólo CPU.",
         tagline: "Dictado por voz",
-        hint: "Local y sin GPU, para GNOME en Wayland",
+        hint: "Local y sin GPU; GNOME en Wayland y Windows",
         accent: [139, 92, 246],
         experimental: false,
-        packaging: Packaging::CargoDeb,
-        oses: &[Os::Linux],
+        packaging: Packaging::Inno,
+        // macOS se agrega cuando IureVoz tenga versión para Mac.
+        oses: &[Os::Linux, Os::Windows],
         gpu_variants: false,
         linux_bins: &["iurevoz"],
         pubkey: None,
-        note: "Versión alfa. Sólo Linux (.deb), pensado para GNOME en Wayland.",
+        note: "Versión alfa. En Linux, pensado para GNOME en Wayland; en Windows se instala para el usuario.",
     },
     AppDef {
         id: "iuredesk",
@@ -379,17 +382,6 @@ impl AppDef {
         format: Format,
     ) -> Option<(&'a Asset, Option<&'a Asset>)> {
         let asset = match self.packaging {
-            Packaging::CargoDeb => {
-                let arch = match sys.arch {
-                    Arch::X64 => "_amd64.deb",
-                    Arch::Arm64 => "_arm64.deb",
-                    Arch::Other => return None,
-                };
-                if sys.os != Os::Linux || format != Format::Deb {
-                    return None;
-                }
-                release.assets.iter().find(|a| a.name.ends_with(arch))?
-            }
             Packaging::Packager => {
                 let ends: &[&str] = match (sys.os, sys.arch, format) {
                     (Os::Linux, Arch::X64, Format::AppImage) => &["_x86_64.AppImage"],
@@ -409,7 +401,7 @@ impl AppDef {
                 ends.iter()
                     .find_map(|e| release.assets.iter().find(|a| a.name.ends_with(e)))?
             }
-            Packaging::Tauri => {
+            Packaging::Tauri | Packaging::Inno => {
                 let suffix = match variant {
                     Variant::Cuda => "-cuda",
                     Variant::Vulkan => "-vulkan",
@@ -425,10 +417,25 @@ impl AppDef {
                     (Os::MacOs, Arch::X64) => &["macos-x64", "macos-universal"],
                     _ => return None,
                 };
-                platforms.iter().find_map(|p| {
-                    let end = format!("-{p}{suffix}{}", format.ext());
-                    release.assets.iter().find(|a| a.name.ends_with(&end))
-                })?
+                platforms
+                    .iter()
+                    .find_map(|p| {
+                        let end = format!("-{p}{suffix}{}", format.ext());
+                        release.assets.iter().find(|a| a.name.ends_with(&end))
+                    })
+                    .or_else(|| {
+                        // IureVoz 0.2.x sólo publicó el .deb de cargo-deb (`_amd64.deb`).
+                        let viejo = self.packaging == Packaging::Inno
+                            && (sys.os, sys.arch, format) == (Os::Linux, Arch::X64, Format::Deb);
+                        viejo
+                            .then(|| {
+                                release
+                                    .assets
+                                    .iter()
+                                    .find(|a| a.name.ends_with("_amd64.deb"))
+                            })
+                            .flatten()
+                    })?
             }
         };
         let sig_name = format!("{}.sig", asset.name);
@@ -610,6 +617,7 @@ mod tests {
             .unwrap(),
             "iureditor_1.13.0_2-macos-universal.app.tar.gz"
         );
+        // IureVoz 0.2.x: sólo el .deb de cargo-deb.
         let voz = Release {
             tag_name: "v0.2.1".into(),
             html_url: String::new(),
@@ -635,9 +643,54 @@ mod tests {
             &voz,
             &sys(Os::Windows, Arch::X64),
             Variant::Cpu,
-            Format::Deb
+            Format::WinExe
         )
         .is_none());
+    }
+
+    /// Nombres que publica el flujo de releases de IureVoz (cargo-deb, generate-rpm, Inno, WiX).
+    #[test]
+    fn picks_iurevoz() {
+        let assets = [
+            "IureVoz-0.3.0-linux-x64.deb",
+            "IureVoz-0.3.0-linux-x64.rpm",
+            "IureVoz-0.3.0-windows-x64.exe",
+            "IureVoz-0.3.0-windows-x64.msi",
+            "IureVoz-0.3.0-windows-x64.zip",
+            "SHA256SUMS",
+        ];
+        let r = Release {
+            tag_name: "v0.3.0".into(),
+            html_url: String::new(),
+            body: None,
+            published_at: None,
+            assets: assets
+                .iter()
+                .map(|n| Asset {
+                    name: n.to_string(),
+                    size: 1,
+                    browser_download_url: String::new(),
+                    url: String::new(),
+                })
+                .collect(),
+        };
+        let n = |os, arch, f| pick("iurevoz", &r, &sys(os, arch), Variant::Cpu, f);
+        assert_eq!(
+            n(Os::Linux, Arch::X64, Format::Deb).unwrap(),
+            "IureVoz-0.3.0-linux-x64.deb"
+        );
+        assert_eq!(
+            n(Os::Linux, Arch::X64, Format::Rpm).unwrap(),
+            "IureVoz-0.3.0-linux-x64.rpm"
+        );
+        assert_eq!(
+            n(Os::Windows, Arch::X64, Format::WinExe).unwrap(),
+            "IureVoz-0.3.0-windows-x64.exe"
+        );
+        assert!(n(Os::Linux, Arch::X64, Format::AppImage).is_none());
+        assert!(!find("iurevoz")
+            .unwrap()
+            .supports(&sys(Os::MacOs, Arch::Arm64)));
     }
 
     /// Nombres que publica `cargo xtask package` de IureDesk (esquema de Tauri).

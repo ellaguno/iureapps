@@ -1,6 +1,6 @@
 //! Detectar, instalar, abrir y desinstalar apps en Linux, Windows y macOS.
 
-use crate::catalog::{AppDef, Format, Variant};
+use crate::catalog::{AppDef, Format, Packaging, Variant};
 use crate::github::{self, Release};
 use crate::state::Managed;
 use crate::system::{Os, SystemInfo};
@@ -107,9 +107,11 @@ fn detect_windows(app: &AppDef) -> Option<Installed> {
         r"Software\Microsoft\Windows\CurrentVersion\Uninstall\{}",
         app.name
     );
+    // Inno Setup registra la app como `<AppId>_is1`.
     let entry = ["HKCU", "HKLM"]
         .iter()
-        .find_map(|hive| reg_query(&format!(r"{hive}\{key}")))?;
+        .flat_map(|hive| [format!(r"{hive}\{key}"), format!(r"{hive}\{key}_is1")])
+        .find_map(|k| reg_query(&k))?;
     let get = |k: &str| {
         entry
             .iter()
@@ -280,7 +282,7 @@ pub fn install(
         Format::AppImage => install_appimage(app, sys, &file),
         Format::Deb => install_deb(&file).map(|_| None),
         Format::Rpm => install_rpm(&file).map(|_| None),
-        Format::WinExe => install_windows(&file).map(|_| None),
+        Format::WinExe => install_windows(app, &file).map(|_| None),
         Format::MacApp => install_mac(app, &file).map(Some),
         Format::TarGz => install_tarball(app, &file).map(Some),
     };
@@ -614,8 +616,16 @@ fn ps_run_wait(exe: &str, args: &str) -> Result<(), String> {
     run("powershell", &["-NoProfile", "-Command", &script])
 }
 
-fn install_windows(file: &Path) -> Result<(), String> {
-    ps_run_wait(&file.to_string_lossy(), "/S")
+/// Parámetros de Inno Setup para instalar o desinstalar sin preguntas (NSIS usa `/S`).
+const INNO_SILENT: &str = "/VERYSILENT /SUPPRESSMSGBOXES /NORESTART";
+
+fn install_windows(app: &AppDef, file: &Path) -> Result<(), String> {
+    let args = if app.packaging == Packaging::Inno {
+        INNO_SILENT
+    } else {
+        "/S"
+    };
+    ps_run_wait(&file.to_string_lossy(), args)
 }
 
 /// Instala la `.app` de un `.app.tar.gz` (Tauri) o de un `.dmg` (cargo-packager).
@@ -758,7 +768,11 @@ pub fn uninstall(app: &AppDef, installed: &Installed) -> Result<(), String> {
             } else {
                 cmd.split(" /").next().unwrap_or(cmd)
             };
-            ps_run_wait(exe, "/S")
+            // El desinstalador de Inno Setup es `unins000.exe`.
+            let inno = Path::new(exe)
+                .file_name()
+                .is_some_and(|n| n.to_string_lossy().to_lowercase().starts_with("unins"));
+            ps_run_wait(exe, if inno { INNO_SILENT } else { "/S" })
         }
         _ => Err("no se sabe desinstalar este formato".into()),
     }

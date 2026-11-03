@@ -39,7 +39,7 @@ Qué hace:
 | Linux | AppImage (por defecto, sin root) | `~/.local/share/iureapps/apps/` + entrada en el menú |
 | Linux | `.tar.gz` con los binarios (IureProject) | `~/.local/share/iureapps/apps/<app>/` + entrada en el menú |
 | Linux | `.deb` / `.rpm` (CUDA, IureVoz, o si no hay FUSE) | `pkexec apt-get install` / `dnf install` |
-| Windows | instalador NSIS `.exe` en modo silencioso (`/S`) | lo que defina cada app (IureDav pide administrador) |
+| Windows | instalador `.exe` en modo silencioso: NSIS (`/S`) o Inno Setup en IureVoz (`/VERYSILENT`) | lo que defina cada app (IureDav pide administrador; IureVoz, sólo el usuario) |
 | macOS | `.app.tar.gz` (o `.dmg` en IureDesk) | `/Applications` o `~/Applications`, sin cuarentena |
 
 Sin `libfuse2` los AppImage se ejecutan con `APPIMAGE_EXTRACT_AND_RUN=1`.
@@ -123,7 +123,8 @@ Si sigue el esquema de nombres de los instaladores Tauri de la suite
 ## Siguientes fases
 
 - **Fase 2 (resto)**: miniaturas o capturas de cada app (`docs/media` de cada repo) en una
-  vista de detalle, e icono propio para IureVoz e IureProject (hoy se dibujan en código).
+  vista de detalle, e icono propio para IureProject (hoy se dibuja en código; el de IureVoz, que también se
+  dibuja aquí, es ya el ícono de la app).
 - Cuenta: elegir entre varias cuentas o instancias, y ver o revocar las contraseñas WebDAV y
   los tokens MCP del equipo.
 - Autoactualización del lanzador (hoy sólo avisa y enlaza la descarga).
