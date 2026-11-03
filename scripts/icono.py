@@ -1,8 +1,12 @@
 """Dibuja el icono del lanzador (assets/iureapps.png) con el estilo de la suite.
 
 Fondo azul marino, la cúpula azul de Iurefficient y un mosaico de 2×2 (las apps).
-Uso: python3 scripts/icono.py assets/iureapps.png
+Uso: python3 scripts/icono.py [assets]
+
+Escribe en ese directorio iureapps.png (256 px: Linux y la ventana), iureapps@2x.png
+(512 px: el .app de macOS) e iureapps.ico (Windows: el .exe y su instalador).
 """
+import os
 import sys
 from PIL import Image, ImageDraw
 
@@ -30,6 +34,9 @@ for k, accent in enumerate(ACCENTS):
     d.rounded_rectangle([x, y, x + size, y + int(size * 0.28)], radius=int(size * 0.18), fill=accent)
     d.rectangle([x, y + int(size * 0.14), x + size, y + int(size * 0.28)], fill=accent)
 
-out = sys.argv[1] if len(sys.argv) > 1 else "assets/iureapps.png"
-img.resize((256, 256), Image.LANCZOS).save(out, optimize=True)
+out = sys.argv[1] if len(sys.argv) > 1 else "assets"
+img.resize((256, 256), Image.LANCZOS).save(os.path.join(out, "iureapps.png"), optimize=True)
+img.resize((512, 512), Image.LANCZOS).save(os.path.join(out, "iureapps@2x.png"), optimize=True)
+sizes = [(n, n) for n in (16, 24, 32, 48, 64, 128, 256)]
+img.save(os.path.join(out, "iureapps.ico"), sizes=sizes)
 print(out)

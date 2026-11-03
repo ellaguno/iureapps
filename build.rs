@@ -16,6 +16,22 @@ fn main() {
     let icon = std::fs::read_to_string("assets/brand/icono-negativo.svg")
         .expect("assets/brand/icono-negativo.svg");
     render(&icon, 256, false, &out.join("icono.png"));
+    windows_resources();
+}
+
+/// En Windows, el icono de la suite y los datos de la versión dentro del .exe (los usan el
+/// Explorador, los accesos directos y el instalador).
+fn windows_resources() {
+    println!("cargo:rerun-if-changed=assets/iureapps.ico");
+    #[cfg(windows)]
+    if std::env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("windows") {
+        let mut res = winresource::WindowsResource::new();
+        res.set_icon("assets/iureapps.ico")
+            .set("ProductName", "Iurefficient Apps")
+            .set("FileDescription", "Iurefficient Apps");
+        res.compile()
+            .expect("no se pudieron incrustar los recursos de Windows");
+    }
 }
 
 /// `crop`: recorta el margen del SVG y deja sólo lo dibujado.

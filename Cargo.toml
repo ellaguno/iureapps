@@ -1,6 +1,6 @@
 [package]
 name = "iureapps"
-version = "0.1.7"
+version = "0.1.8"
 edition = "2021"
 description = "Lanzador e instalador ligero de las apps de escritorio de Iurefficient"
 license = "MIT"
@@ -27,6 +27,10 @@ anyhow = "1"
 [build-dependencies]
 # Sólo al compilar: pasa los SVG de marca a PNG (ver build.rs).
 resvg = { version = "0.45", default-features = false }
+
+# Sólo al compilar en Windows: incrusta el icono y la versión en el .exe (ver build.rs).
+[target.'cfg(windows)'.build-dependencies]
+winresource = "0.1"
 
 [profile.release]
 opt-level = "s"
@@ -70,3 +74,25 @@ libxkbcommon-x11 = "*"
 mesa-libGL = "*"
 mesa-libEGL = "*"
 dbus-libs = "*"
+
+# `cargo packager`: instalador NSIS (-setup.exe) en Windows y .app dentro de un .dmg en macOS.
+# Linux sigue con `cargo deb` y `cargo generate-rpm` (arriba).
+[package.metadata.packager]
+product-name = "Iurefficient Apps"
+identifier = "com.iurefficient.iureapps"
+publisher = "Iurefficient"
+authors = ["Eduardo Llaguno <eduardo@llaguno.com>"]
+category = "Utility"
+copyright = "Copyright (c) 2026 ellaguno. Licencia MIT."
+out-dir = "target/packager"
+binaries = [{ path = "iureapps", main = true }]
+icons = ["assets/iureapps.png", "assets/iureapps@2x.png", "assets/iureapps.ico"]
+
+[package.metadata.packager.nsis]
+# Sin pedir administrador: va a %LOCALAPPDATA%, igual que las apps que instala.
+installer-mode = "currentUser"
+installer-icon = "assets/iureapps.ico"
+languages = ["Spanish", "English"]
+
+[package.metadata.packager.macos]
+minimum-system-version = "11.0"

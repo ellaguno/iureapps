@@ -105,12 +105,18 @@ Al subir una etiqueta `vX.Y.Z`, o al lanzar `build.yml` a mano con la entrada `r
 | `iureapps_X.Y.Z-1_amd64.deb` | Debian, Ubuntu y derivadas (`sudo apt install ./iureapps_…deb`) |
 | `iureapps-X.Y.Z-1.x86_64.rpm` | Fedora, openSUSE y derivadas (`sudo dnf install ./iureapps-…rpm`) |
 | `iureapps-linux-x64.tar.gz` | cualquier Linux x64 (binario suelto) |
-| `iureapps-windows-x64.exe` | Windows |
-| `iureapps-macos-arm64.tar.gz`, `iureapps-macos-x64.tar.gz` | macOS (Apple Silicon e Intel) |
+| `iureapps-windows-x64-setup.exe` | Windows: instalador (menú Inicio, escritorio y desinstalador; sin administrador) |
+| `iureapps-windows-x64.exe` | Windows: ejecutable portátil, sin instalar |
+| `iureapps-macos-arm64.dmg`, `iureapps-macos-x64.dmg` | macOS (Apple Silicon e Intel): `Iurefficient Apps.app` para arrastrar a Aplicaciones |
+| `iureapps-macos-arm64.tar.gz`, `iureapps-macos-x64.tar.gz` | macOS: binario suelto |
 
-Los paquetes instalan el binario en `/usr/bin`, la entrada del menú y el icono. En macOS el
-binario no está firmado: la primera vez, clic derecho → Abrir (o
-`xattr -d com.apple.quarantine iureapps`). El icono se regenera con `python3 scripts/icono.py`. El lanzador avisa cuando hay una versión suya más nueva.
+Los paquetes de Linux instalan el binario en `/usr/bin`, la entrada del menú y el icono. El
+instalador de Windows y el `.dmg` los hace [cargo-packager](https://github.com/crabnebula-dev/cargo-packager)
+(`[package.metadata.packager]` en `Cargo.toml`). Nada está firmado con certificado: en Windows,
+SmartScreen pide «Más información → Ejecutar de todos modos»; en macOS, la primera vez, clic
+derecho → Abrir (o `xattr -d com.apple.quarantine …`). Los iconos (`iureapps.png`,
+`iureapps@2x.png` e `iureapps.ico`) se regeneran con `python3 scripts/icono.py`. El lanzador
+avisa cuando hay una versión suya más nueva.
 
 ## Agregar una app
 
