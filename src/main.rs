@@ -15,6 +15,8 @@ mod verify;
 
 fn main() {
     connect::init();
+    // Entradas del menú de versiones anteriores sin icono ni clase de ventana (engrane en GNOME).
+    std::thread::spawn(installer::repair_desktop_entries);
     let args: Vec<String> = std::env::args().skip(1).collect();
     if !args.is_empty() {
         attach_console();

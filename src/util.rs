@@ -25,6 +25,18 @@ pub fn home() -> Option<PathBuf> {
 pub fn command(program: &str) -> Command {
     #[allow(unused_mut)]
     let mut c = Command::new(program);
+    // Si iureapps corre como AppImage, sus variables no deben llegar a las apps que lanza (Tauri
+    // registraba su manejador de enlaces con `Exec=$APPIMAGE`, el AppImage equivocado).
+    for v in [
+        "APPIMAGE",
+        "APPDIR",
+        "ARGV0",
+        "OWD",
+        "APPIMAGE_UUID",
+        "APPIMAGE_EXTRACT_AND_RUN",
+    ] {
+        c.env_remove(v);
+    }
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;

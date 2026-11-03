@@ -335,21 +335,157 @@ fn install_appimage(
     } else {
         format!("env APPIMAGE_EXTRACT_AND_RUN=1 \"{}\" %F", dest.display())
     };
-    write_desktop(app, &exec);
+    let meta = appimage_meta(app, &dest);
+    write_desktop(app, &exec, &meta);
     Ok(Some(dest))
 }
 
-/// Entrada en el menú de aplicaciones del usuario.
-fn write_desktop(app: &AppDef, exec: &str) {
-    let desktop = format!(
-        "[Desktop Entry]\nType=Application\nName={}\nComment={}\nExec={exec}\nIcon=application-x-executable\nTerminal=false\nCategories=Office;\nX-Iureapps=true\n",
-        app.name, app.description
-    );
+/// Lo que el menú necesita del paquete: icono ya copiado fuera y clase de ventana.
+#[derive(Debug, Default, Clone, PartialEq)]
+struct DesktopMeta {
+    icon: Option<PathBuf>,
+    wm_class: Option<String>,
+}
+
+/// Entrada en el menú de aplicaciones del usuario. Sin `Icon` ni `StartupWMClass` reales, GNOME
+/// muestra un engrane y no asocia la ventana con su entrada.
+fn write_desktop(app: &AppDef, exec: &str, meta: &DesktopMeta) {
     let df = desktop_file(app);
     if let Some(d) = df.parent() {
         let _ = std::fs::create_dir_all(d);
     }
-    let _ = std::fs::write(df, desktop);
+    let _ = std::fs::write(df, desktop_entry(app, exec, meta));
+}
+
+fn desktop_entry(app: &AppDef, exec: &str, meta: &DesktopMeta) -> String {
+    let icon = meta
+        .icon
+        .as_ref()
+        .map(|p| p.to_string_lossy().into_owned())
+        .unwrap_or_else(|| "application-x-executable".into());
+    let mut out = format!(
+        "[Desktop Entry]\nType=Application\nName={}\nComment={}\nExec={exec}\nIcon={icon}\nTerminal=false\nCategories=Office;\n",
+        app.name, app.description
+    );
+    if let Some(w) = &meta.wm_class {
+        out.push_str(&format!("StartupWMClass={w}\nStartupNotify=true\n"));
+    }
+    out.push_str("X-Iureapps=true\n");
+    out
+}
+
+/// Icono y `StartupWMClass` del propio AppImage: `.DirIcon` y el `.desktop` de
+/// `usr/share/applications`, sacados con `--appimage-extract` (no necesita FUSE). El icono se
+/// copia a `<datos>/icons/<id>.png|svg` para que siga ahí si el AppImage cambia.
+fn appimage_meta(app: &AppDef, appimage: &Path) -> DesktopMeta {
+    let tmp = util::data_dir()
+        .join("tmp")
+        .join(format!("meta-{}", app.id));
+    let _ = std::fs::remove_dir_all(&tmp);
+    if std::fs::create_dir_all(&tmp).is_err() {
+        return DesktopMeta::default();
+    }
+    let extract = |pattern: &str| {
+        let _ = util::command(&appimage.to_string_lossy())
+            .arg("--appimage-extract")
+            .arg(pattern)
+            .current_dir(&tmp)
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status();
+    };
+    let root = tmp.join("squashfs-root");
+    extract(".DirIcon");
+    extract("usr/share/applications/*.desktop");
+    // `.DirIcon` suele ser un enlace a un archivo de dentro: se extrae también el destino.
+    let mut icon_src = root.join(".DirIcon");
+    for _ in 0..4 {
+        let Ok(target) = std::fs::read_link(&icon_src) else {
+            break;
+        };
+        let rel = target.to_string_lossy().trim_start_matches('/').to_string();
+        if rel.split('/').any(|c| c == "..") {
+            break;
+        }
+        extract(&rel);
+        icon_src = root.join(rel);
+    }
+    let icon = std::fs::read(&icon_src).ok().and_then(|bytes| {
+        let ext = icon_ext(&bytes)?;
+        let dir = util::data_dir().join("icons");
+        std::fs::create_dir_all(&dir).ok()?;
+        let dest = dir.join(format!("{}.{ext}", app.id));
+        std::fs::write(&dest, &bytes).ok()?;
+        Some(dest)
+    });
+    let wm_class = std::fs::read_dir(root.join("usr/share/applications"))
+        .into_iter()
+        .flatten()
+        .flatten()
+        .filter_map(|e| std::fs::read_to_string(e.path()).ok())
+        .find_map(|t| desktop_key(&t, "StartupWMClass"));
+    let _ = std::fs::remove_dir_all(&tmp);
+    DesktopMeta { icon, wm_class }
+}
+
+/// Extensión del icono por su contenido (PNG o SVG); otra cosa no se usa.
+fn icon_ext(bytes: &[u8]) -> Option<&'static str> {
+    if bytes.starts_with(b"\x89PNG\r\n\x1a\n") {
+        return Some("png");
+    }
+    let head = String::from_utf8_lossy(bytes.get(..bytes.len().min(512))?);
+    (head.contains("<svg")).then_some("svg")
+}
+
+/// Valor de una clave de la sección `[Desktop Entry]` (sin las traducciones `Clave[es]`).
+fn desktop_key(text: &str, key: &str) -> Option<String> {
+    let mut in_entry = false;
+    for line in text.lines().map(str::trim) {
+        if line.starts_with('[') {
+            in_entry = line == "[Desktop Entry]";
+            continue;
+        }
+        if !in_entry {
+            continue;
+        }
+        if let Some((k, v)) = line.split_once('=') {
+            if k.trim() == key && !v.trim().is_empty() {
+                return Some(v.trim().to_string());
+            }
+        }
+    }
+    None
+}
+
+/// Al arrancar: las entradas que escribieron versiones anteriores (engrane, sin `StartupWMClass`)
+/// se rehacen con el icono y la clase del AppImage instalado. Rápido si no hay nada que hacer.
+pub fn repair_desktop_entries() {
+    if !cfg!(target_os = "linux") {
+        return;
+    }
+    for app in crate::catalog::APPS {
+        let df = desktop_file(app);
+        let Ok(text) = std::fs::read_to_string(&df) else {
+            continue;
+        };
+        if !text.contains("X-Iureapps=true") || !text.contains("Icon=application-x-executable") {
+            continue;
+        }
+        let Some(exec) = desktop_key(&text, "Exec") else {
+            continue;
+        };
+        let appimage = util::data_dir()
+            .join("apps")
+            .join(format!("{}.AppImage", app.name));
+        if !appimage.is_file() || !exec.contains(&*appimage.to_string_lossy()) {
+            continue;
+        }
+        let meta = appimage_meta(app, &appimage);
+        if meta != DesktopMeta::default() {
+            write_desktop(app, &exec, &meta);
+        }
+    }
 }
 
 /// Carpeta de una app instalada desde `.tar.gz`.
@@ -409,7 +545,12 @@ fn install_tarball(app: &AppDef, file: &Path) -> Result<PathBuf, String> {
             std::fs::set_permissions(&bin, std::fs::Permissions::from_mode(0o755))
                 .map_err(|e| e.to_string())?;
         }
-        write_desktop(app, &format!("\"{}\" %F", bin.display()));
+        // Sin icono dentro del `.tar.gz`; la ventana se llama como el binario.
+        let meta = DesktopMeta {
+            icon: None,
+            wm_class: Some(bin_name.to_string()),
+        };
+        write_desktop(app, &format!("\"{}\" %F", bin.display()), &meta);
         Ok(bin)
     })();
     let _ = std::fs::remove_dir_all(&tmp);
@@ -627,6 +768,44 @@ pub fn uninstall(app: &AppDef, installed: &Installed) -> Result<(), String> {
 mod tests {
     use super::*;
     use crate::github::Asset;
+
+    #[test]
+    fn desktop_entry_names_icon_and_window_class() {
+        let app = &crate::catalog::APPS[0];
+        let meta = DesktopMeta {
+            icon: Some(PathBuf::from("/d/icons/x.png")),
+            wm_class: Some("iuredesk".into()),
+        };
+        let e = desktop_entry(app, "\"/a/x.AppImage\" %F", &meta);
+        assert!(e.contains("Icon=/d/icons/x.png\n"), "{e}");
+        assert!(e.contains("StartupWMClass=iuredesk\n"), "{e}");
+        assert!(e.contains("X-Iureapps=true"));
+        let plain = desktop_entry(app, "x", &DesktopMeta::default());
+        assert!(plain.contains("Icon=application-x-executable"));
+        assert!(!plain.contains("StartupWMClass"));
+    }
+
+    #[test]
+    fn reads_keys_only_from_the_main_section() {
+        let t = "[Desktop Entry]\nName=IureDesk\nStartupWMClass = iuredesk\n[Desktop Action compose]\nExec=y\n";
+        assert_eq!(
+            desktop_key(t, "StartupWMClass").as_deref(),
+            Some("iuredesk")
+        );
+        assert_eq!(desktop_key(t, "Exec"), None);
+        assert_eq!(desktop_key("StartupWMClass=x", "StartupWMClass"), None);
+    }
+
+    #[test]
+    fn icon_kind_by_content() {
+        assert_eq!(icon_ext(b"\x89PNG\r\n\x1a\nrest"), Some("png"));
+        assert_eq!(
+            icon_ext(b"<?xml version='1.0'?><svg xmlns=''/>"),
+            Some("svg")
+        );
+        assert_eq!(icon_ext(b"GIF89a"), None);
+        assert_eq!(icon_ext(b""), None);
+    }
 
     /// El `.tar.gz` de `cargo xtask dist` (carpeta `<app>-<ver>-x86_64-linux/` con los binarios).
     #[cfg(target_os = "linux")]
