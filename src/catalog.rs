@@ -148,7 +148,7 @@ pub static APPS: &[AppDef] = &[
         hint: "Reemplaza Outlook, Thunderbird y Apple Mail",
         // Azul del logotipo de Iurefficient (`iurefficient-ui`, `tokens::brand::BLUE`).
         accent: [6, 80, 236],
-        experimental: true,
+        experimental: false,
         // Rust puro (cargo-packager), pero publica con el esquema de nombres de Tauri y firma
         // minisign (`cargo xtask package` y `cargo xtask sign` de IureDesk).
         packaging: Packaging::Tauri,
@@ -156,7 +156,7 @@ pub static APPS: &[AppDef] = &[
         gpu_variants: false,
         linux_bins: &["iuredesk"],
         pubkey: Some(KEY_3B1C),
-        note: "Versión alfa.",
+        note: "Versión alfa. Windows: instalador .exe (por usuario) o .msi (para todo el equipo).",
     },
     AppDef {
         id: "iureproject",
