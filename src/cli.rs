@@ -19,6 +19,7 @@ Uso:
   iureapps conectar <instancia> <correo>   inicia sesión (pide la contraseña)
   iureapps desconectar             cierra la sesión en este equipo
   iureapps iurefficient            abre la instancia en el navegador
+  iureapps autoactualizar          instala la versión nueva de iureapps, si la hay
 
 Token para repos privados: variable IUREAPPS_GITHUB_TOKEN (o GITHUB_TOKEN).";
 
@@ -46,6 +47,7 @@ pub fn run(args: &[String]) -> i32 {
         "conectar" | "login" => login(&args[1..]),
         "desconectar" | "logout" => logout(),
         "iurefficient" | "web" => open_web(),
+        "autoactualizar" | "self-update" => self_update(),
         other => Err(format!("orden desconocida: {other}\n\n{HELP}")),
     };
     match result {
@@ -96,6 +98,31 @@ pub fn print_system(sys: &SystemInfo) {
         let (v, why) = app.recommend_variant(sys);
         println!("IureTranscribe recomendado: {} — {why}", v.label());
     }
+}
+
+fn self_update() -> Result<(), String> {
+    use crate::selfupdate;
+    let release = github::latest_release(selfupdate::REPO, None)?;
+    if !selfupdate::is_newer(&release) {
+        println!(
+            "iureapps {} ya es la última versión",
+            env!("CARGO_PKG_VERSION")
+        );
+        return Ok(());
+    }
+    println!(
+        "Actualizando iureapps {} → {}",
+        env!("CARGO_PKG_VERSION"),
+        release.version()
+    );
+    let log = |m: String| println!("  {m}");
+    match selfupdate::update(&release, &log, &|_| {})? {
+        selfupdate::Outcome::Restart { version, .. } => {
+            println!("iureapps {version} instalada")
+        }
+        selfupdate::Outcome::Exit => println!("msiexec termina la instalación"),
+    }
+    Ok(())
 }
 
 fn app_arg(args: &[String]) -> Result<&'static catalog::AppDef, String> {

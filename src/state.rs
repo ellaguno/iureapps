@@ -20,7 +20,7 @@ pub struct Pref {
     pub format: Option<Format>,
 }
 
-#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct State {
     #[serde(default)]
     pub installs: BTreeMap<String, Managed>,
@@ -31,6 +31,25 @@ pub struct State {
     /// Vista de la ventana: mosaico (por defecto) o tabla.
     #[serde(default)]
     pub table_view: bool,
+    /// Instalar sola la versión nueva del lanzador cuando no hace falta contraseña.
+    #[serde(default = "yes")]
+    pub auto_update: bool,
+}
+
+fn yes() -> bool {
+    true
+}
+
+impl Default for State {
+    fn default() -> Self {
+        State {
+            installs: BTreeMap::new(),
+            prefs: BTreeMap::new(),
+            github_token: None,
+            table_view: false,
+            auto_update: true,
+        }
+    }
 }
 
 fn path() -> PathBuf {

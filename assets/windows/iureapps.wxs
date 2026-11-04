@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Instalador .msi de Iurefficient Apps para todos los usuarios (Archivos de programa).
+  Se compila en CI con WiX 5:
+    wix build assets/windows/iureapps.wxs -arch x64 -d Version=0.1.9 -d Exe=ruta\iureapps.exe -o iureapps-windows-x64.msi
+  El UpgradeCode no debe cambiar nunca: es lo que permite que una versión sustituya a la anterior.
+-->
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+  <Package Name="Iurefficient Apps"
+           Manufacturer="Iurefficient"
+           Version="$(var.Version)"
+           UpgradeCode="f8422669-b620-4ed2-9360-e84aabc4bedd"
+           Scope="perMachine"
+           Codepage="1252"
+           Compressed="yes">
+    <SummaryInformation Description="Lanzador e instalador de las apps de escritorio de Iurefficient" />
+    <MajorUpgrade DowngradeErrorMessage="Ya está instalada una versión más reciente de Iurefficient Apps." />
+    <MediaTemplate EmbedCab="yes" />
+
+    <Icon Id="iureapps.ico" SourceFile="$(sys.SOURCEFILEDIR)iureapps.ico" />
+    <Property Id="ARPPRODUCTICON" Value="iureapps.ico" />
+    <Property Id="ARPURLINFOABOUT" Value="https://github.com/ellaguno/iureapps" />
+    <Property Id="ARPHELPLINK" Value="https://iurefficient.com" />
+
+    <StandardDirectory Id="ProgramFiles64Folder">
+      <Directory Id="INSTALLFOLDER" Name="Iurefficient Apps">
+        <Component Id="MainExe" Guid="*">
+          <File Id="IureappsExe" Source="$(var.Exe)" Name="iureapps.exe" KeyPath="yes">
+            <Shortcut Id="StartMenuShortcut"
+                      Directory="ProgramMenuFolder"
+                      Name="Iurefficient Apps"
+                      Description="Instala, actualiza y abre las apps de Iurefficient"
+                      WorkingDirectory="INSTALLFOLDER"
+                      Icon="iureapps.ico"
+                      Advertise="yes" />
+          </File>
+        </Component>
+      </Directory>
+    </StandardDirectory>
+    <StandardDirectory Id="ProgramMenuFolder" />
+  </Package>
+</Wix>
