@@ -86,6 +86,8 @@ jobs:
           dotnet tool install --global wix --version 5.0.2
           wix build assets/windows/iureapps.wxs -arch x64 -d "Version=$version" -d "Exe=$exe" -o "$dist/iureapps-windows-x64.msi"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          # Símbolos de depuración del .msi: no van al release.
+          Remove-Item "$dist/*.wixpdb" -ErrorAction SilentlyContinue
 
           # -setup.exe por usuario (sin administrador; se autoactualiza sin pedir permisos), con NSIS.
           $makensis = "${env:ProgramFiles(x86)}\NSIS\makensis.exe"
