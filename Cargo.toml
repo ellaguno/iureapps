@@ -19,6 +19,8 @@ minisign-verify = "0.3"
 base64 = "0.22"
 sha2 = "0.10"
 png = "0.18"
+# Reemplaza el propio ejecutable al autoactualizarse (en Windows, aunque esté en uso).
+self-replace = "1"
 # Cuenta compartida con las demás apps (mismo llavero y «cuenta activa»).
 iurefficient-connect = { git = "https://github.com/ellaguno/iurefficient-connect", tag = "v0.7.1" }
 tokio = { version = "1", features = ["rt"] }
@@ -27,6 +29,10 @@ anyhow = "1"
 [build-dependencies]
 # Sólo al compilar: pasa los SVG de marca a PNG (ver build.rs).
 resvg = { version = "0.45", default-features = false }
+
+# Icono y datos de versión dentro del .exe de Windows (los muestran el Explorador y los accesos).
+[target.'cfg(windows)'.build-dependencies]
+winresource = "0.1"
 
 [profile.release]
 opt-level = "s"

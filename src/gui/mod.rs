@@ -8,19 +8,20 @@ use crate::connect;
 use crate::github::{self, Release};
 use crate::installer::{self, Installed};
 use crate::plan::{self, Status};
-use crate::state::{version_cmp, Managed, State};
+use crate::selfupdate;
+use crate::state::{Managed, State};
 use crate::system::SystemInfo;
 use eframe::egui::{self, RichText};
 use std::sync::mpsc::{channel, Receiver, Sender};
 use std::time::Instant;
-
-const SELF_REPO: &str = "ellaguno/iureapps";
 
 enum Msg {
     System(Box<SystemInfo>),
     Detected(usize, Option<Installed>),
     Release(usize, Result<Release, String>),
     SelfRelease(Release),
+    SelfProgress(f32),
+    SelfDone(Result<selfupdate::Outcome, String>),
     Progress(usize, f32),
     Log(String),
     Done(usize, Result<Option<Managed>, String>),
@@ -60,6 +61,19 @@ struct LoginForm {
     focused: bool,
 }
 
+/// Autoactualización del lanzador.
+#[derive(Default)]
+struct SelfUpdate {
+    /// Versión nueva publicada.
+    release: Option<Release>,
+    /// Se instala sola (no pide contraseña ni elevación).
+    silent: bool,
+    progress: Option<f32>,
+    error: Option<String>,
+    /// Versión ya instalada a la espera de reiniciar.
+    ready: Option<(std::path::PathBuf, String)>,
+}
+
 #[derive(Default)]
 struct Row {
     release: Option<Result<Release, String>>,
@@ -92,7 +106,7 @@ pub struct LauncherApp {
     rows: Vec<Row>,
     state: State,
     log: Vec<String>,
-    self_update: Option<Release>,
+    self_update: SelfUpdate,
     show_settings: bool,
     show_system: bool,
     show_log: bool,
@@ -177,7 +191,7 @@ impl LauncherApp {
             token_input: state.github_token.clone().unwrap_or_default(),
             state,
             log: Vec::new(),
-            self_update: None,
+            self_update: SelfUpdate::default(),
             show_settings: false,
             show_system: false,
             show_log: false,
@@ -242,7 +256,7 @@ impl LauncherApp {
         }
         let (tx, ctx) = (self.tx.clone(), self.ctx.clone());
         std::thread::spawn(move || {
-            if let Ok(r) = github::latest_release(SELF_REPO, None) {
+            if let Ok(r) = github::latest_release(selfupdate::REPO, None) {
                 Self::send(&tx, &ctx, Msg::SelfRelease(r));
             }
         });
@@ -266,8 +280,34 @@ impl LauncherApp {
                     }
                 }
                 Msg::SelfRelease(r) => {
-                    if version_cmp(r.version(), env!("CARGO_PKG_VERSION")).is_gt() {
-                        self.self_update = Some(r);
+                    let u = &mut self.self_update;
+                    if selfupdate::is_newer(&r) && u.progress.is_none() && u.ready.is_none() {
+                        u.silent = selfupdate::method().is_ok_and(|m| m.is_silent());
+                        u.release = Some(r);
+                        if u.silent && self.state.auto_update {
+                            self.start_self_update();
+                        }
+                    }
+                }
+                Msg::SelfProgress(p) => self.self_update.progress = Some(p),
+                Msg::SelfDone(r) => {
+                    let u = &mut self.self_update;
+                    u.progress = None;
+                    match r {
+                        Ok(selfupdate::Outcome::Restart { exe, version }) => {
+                            self.log
+                                .push(format!("Iurefficient Apps {version} instalada"));
+                            u.ready = Some((exe, version));
+                            self.update_dismissed = false;
+                        }
+                        Ok(selfupdate::Outcome::Exit) => {
+                            self.ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+                        }
+                        Err(e) => {
+                            self.log.push(format!("Iurefficient Apps: {e}"));
+                            u.error = Some(e);
+                            self.update_dismissed = false;
+                        }
                     }
                 }
                 Msg::Progress(i, p) => self.rows[i].progress = Some(p),
@@ -397,6 +437,47 @@ impl LauncherApp {
         });
     }
 
+    /// Descarga e instala la versión nueva del lanzador en segundo plano.
+    fn start_self_update(&mut self) {
+        let Some(release) = self.self_update.release.clone() else {
+            return;
+        };
+        if self.self_update.progress.is_some() {
+            return;
+        }
+        self.self_update.progress = Some(0.0);
+        self.self_update.error = None;
+        let (tx, ctx) = (self.tx.clone(), self.ctx.clone());
+        std::thread::spawn(move || {
+            let (tx2, ctx2) = (tx.clone(), ctx.clone());
+            let log = move |m: String| {
+                Self::send(&tx2, &ctx2, Msg::Log(format!("Iurefficient Apps: {m}")))
+            };
+            let (tx3, ctx3) = (tx.clone(), ctx.clone());
+            let last = std::cell::Cell::new(0.0f32);
+            let progress = move |p: f32| {
+                if p - last.get() >= 0.01 || p >= 1.0 {
+                    last.set(p);
+                    Self::send(&tx3, &ctx3, Msg::SelfProgress(p));
+                }
+            };
+            let r = selfupdate::update(&release, &log, &progress);
+            Self::send(&tx, &ctx, Msg::SelfDone(r));
+        });
+    }
+
+    /// Reinicia con la versión ya instalada si no hay ninguna operación en curso.
+    fn restart_self(&mut self) {
+        if self.rows.iter().any(|r| r.busy.is_some()) || self.account.busy {
+            self.log
+                .push("Espera a que terminen las instalaciones en curso para reiniciar".into());
+            return;
+        }
+        if let Some((exe, _)) = &self.self_update.ready {
+            selfupdate::restart(exe);
+        }
+    }
+
     fn start_uninstall(&mut self, i: usize) {
         let Some(inst) = self.rows[i].installed.clone() else {
             return;
@@ -514,6 +595,17 @@ impl LauncherApp {
                 self.state.save();
                 self.refresh_releases();
             }
+            ui.separator();
+            if ui
+                .checkbox(
+                    &mut self.state.auto_update,
+                    "Actualizar Iurefficient Apps automáticamente",
+                )
+                .changed()
+            {
+                self.state.save();
+            }
+            ui.label(RichText::new("Si la instalación no pide contraseña, la versión nueva se descarga y se instala sola; se usa al reiniciar.").small());
             ui.separator();
             ui.label(format!("Datos del lanzador: {}", crate::util::data_dir().display()));
             if ui.button("Restablecer variantes y formatos elegidos").clicked() {

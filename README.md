@@ -58,6 +58,7 @@ iureapps conectar 2.ds.iurefficient.com yo@despacho.com   # pide contraseña (y 
 iureapps cuenta               # estado de la cuenta compartida
 iureapps iurefficient         # abre la instancia en el navegador
 iureapps desconectar
+iureapps autoactualizar       # instala la versión nueva del propio lanzador
 ```
 
 IureDesk publica sus instaladores (firmados con minisign) en su propio repo,
@@ -104,12 +105,35 @@ Al subir una etiqueta `vX.Y.Z`, o al lanzar `build.yml` a mano con la entrada `r
 | `iureapps_X.Y.Z-1_amd64.deb` | Debian, Ubuntu y derivadas (`sudo apt install ./iureapps_…deb`) |
 | `iureapps-X.Y.Z-1.x86_64.rpm` | Fedora, openSUSE y derivadas (`sudo dnf install ./iureapps-…rpm`) |
 | `iureapps-linux-x64.tar.gz` | cualquier Linux x64 (binario suelto) |
-| `iureapps-windows-x64.exe` | Windows |
+| `iureapps-windows-x64-setup.exe` | Windows: instalador para el usuario (sin administrador, en `%LOCALAPPDATA%\Programs`) |
+| `iureapps-windows-x64.msi` | Windows: instalador para todos los usuarios (Archivos de programa; despliegue por GPO/Intune) |
+| `iureapps-windows-x64.exe` | Windows: ejecutable suelto, sin instalar |
 | `iureapps-macos-arm64.tar.gz`, `iureapps-macos-x64.tar.gz` | macOS (Apple Silicon e Intel) |
+| `SHA256SUMS` (y `*.sig` si hay clave) | verificación de la autoactualización |
 
 Los paquetes instalan el binario en `/usr/bin`, la entrada del menú y el icono. En macOS el
 binario no está firmado: la primera vez, clic derecho → Abrir (o
-`xattr -d com.apple.quarantine iureapps`). El icono se regenera con `python3 scripts/icono.py`. El lanzador avisa cuando hay una versión suya más nueva.
+`xattr -d com.apple.quarantine iureapps`). El icono se regenera con `python3 scripts/icono.py`.
+
+### Autoactualización
+
+Al abrirse, el lanzador consulta su propio release. Si hay una versión más nueva:
+
+| Instalado con | Cómo se actualiza |
+| --- | --- |
+| `-setup.exe`, `.tar.gz` o ejecutable suelto en una carpeta del usuario | baja el binario, lo verifica y reemplaza el que está corriendo, **solo** (se puede desactivar en *Ajustes*); «Reiniciar» abre la versión nueva |
+| `.msi` (Archivos de programa) | con «Actualizar» baja el `.msi` y lanza `msiexec` (pide elevación); el lanzador se cierra y se vuelve a abrir al terminar |
+| `.deb` / `.rpm` | con «Actualizar» instala el paquete nuevo con pkexec |
+
+Cada descarga se comprueba contra `SHA256SUMS`. Para exigir además firma minisign: generar
+una clave con `npx @tauri-apps/cli signer generate -w iureapps.key`, guardar la privada y su
+contraseña en los secretos `IUREAPPS_SIGNING_KEY` e `IUREAPPS_SIGNING_KEY_PASSWORD` del repo,
+y poner la pública (`iureapps.key.pub`) en `PUBKEY` de `src/selfupdate.rs`. Desde esa versión,
+la firma `.sig` es obligatoria.
+
+Los instaladores de Windows salen de `assets/windows/` (`iureapps.wxs` con WiX 5,
+`iureapps.nsi` con NSIS); ninguno está firmado con Authenticode, así que SmartScreen avisa
+la primera vez.
 
 ## Agregar una app
 
@@ -126,7 +150,6 @@ Si sigue el esquema de nombres de los instaladores Tauri de la suite
   dibuja aquí, es ya el ícono de la app).
 - Cuenta: elegir entre varias cuentas o instancias, y ver o revocar las contraseñas WebDAV y
   los tokens MCP del equipo.
-- Autoactualización del lanzador (hoy sólo avisa y enlaza la descarga).
 - Comprobar requisitos por app: Tesseract/idiomas de IureOCR, rclone/WinFsp/macFUSE de
   IureDav, GNOME en Wayland de IureVoz.
 - Modelos de Whisper: ver los instalados y descargar el adecuado según RAM/VRAM.

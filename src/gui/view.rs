@@ -283,9 +283,39 @@ impl LauncherApp {
     }
 
     fn update_banner(&mut self, ui: &mut Ui) {
-        let Some(r) = self.self_update.clone().filter(|_| !self.update_dismissed) else {
+        if self.update_dismissed {
+            return;
+        }
+        let u = &self.self_update;
+        let Some(r) = u.release.clone() else {
             return;
         };
+        let (tag, message) = if let Some((_, v)) = &u.ready {
+            (
+                "Listo",
+                format!("Iurefficient Apps {v} ya está instalada; reinicia para usarla."),
+            )
+        } else if let Some(p) = u.progress {
+            (
+                "Nuevo",
+                format!(
+                    "Actualizando Iurefficient Apps a {}… {:.0} %",
+                    r.version(),
+                    p * 100.0
+                ),
+            )
+        } else if let Some(e) = &u.error {
+            (
+                "Error",
+                format!("No se pudo actualizar a {}: {e}", r.version()),
+            )
+        } else {
+            (
+                "Nuevo",
+                format!("Iurefficient Apps {} está disponible.", r.version()),
+            )
+        };
+        let (ready, busy) = (u.ready.is_some(), u.progress.is_some());
         ui.add_space(14.0);
         egui::Frame::new()
             .fill(Color32::from_rgb(14, 22, 40))
@@ -297,21 +327,24 @@ impl LauncherApp {
                         .fill(BRAND)
                         .inner_margin(egui::Margin::symmetric(8, 3))
                         .show(ui, |ui| {
-                            ui.label(caps("Nuevo", 10.5, Color32::WHITE));
+                            ui.label(caps(tag, 10.5, Color32::WHITE));
                         });
-                    ui.label(
-                        RichText::new(format!(
-                            "Iurefficient Apps {} está disponible.",
-                            r.version()
-                        ))
-                        .color(TEXT),
-                    );
+                    ui.label(RichText::new(message).color(TEXT));
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                        if flat_button(ui, "×", None, vec2(30.0, 30.0)).clicked() {
+                        if !busy && flat_button(ui, "×", None, vec2(30.0, 30.0)).clicked() {
                             self.update_dismissed = true;
                         }
-                        if flat_button(ui, "Descargar", Some(TEXT), vec2(110.0, 30.0)).clicked() {
-                            super::open_link(&r.html_url);
+                        if ready {
+                            if flat_button(ui, "Reiniciar", Some(TEXT), vec2(110.0, 30.0)).clicked()
+                            {
+                                self.restart_self();
+                            }
+                        } else if busy {
+                            ui.spinner();
+                        } else if flat_button(ui, "Actualizar", Some(TEXT), vec2(110.0, 30.0))
+                            .clicked()
+                        {
+                            self.start_self_update();
                         }
                         if ui
                             .add(

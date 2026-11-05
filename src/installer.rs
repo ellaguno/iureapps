@@ -625,7 +625,7 @@ fn as_root(args: &[&str]) -> Result<(), String> {
     run("pkexec", args)
 }
 
-fn install_deb(file: &Path) -> Result<(), String> {
+pub(crate) fn install_deb(file: &Path) -> Result<(), String> {
     let f = file.to_string_lossy();
     if which("apt-get").is_some() {
         as_root(&["apt-get", "install", "-y", "--allow-downgrades", &f])
@@ -634,7 +634,7 @@ fn install_deb(file: &Path) -> Result<(), String> {
     }
 }
 
-fn install_rpm(file: &Path) -> Result<(), String> {
+pub(crate) fn install_rpm(file: &Path) -> Result<(), String> {
     let f = file.to_string_lossy();
     if which("dnf").is_some() {
         as_root(&["dnf", "install", "-y", "--nogpgcheck", &f])
