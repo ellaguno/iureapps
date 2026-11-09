@@ -99,7 +99,7 @@ jobs:
           rm -f "$p12"
           # Intermedio de Developer ID (G2), por si el runner no lo trae.
           curl -fsSL https://www.apple.com/certificateauthority/DeveloperIDG2CA.cer -o "$RUNNER_TEMP/g2.cer"
-          security import "$RUNNER_TEMP/g2.cer" -k "$kc" || true
+          security import "$RUNNER_TEMP/g2.cer" -k "$kc" 2>/dev/null || true
           security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KEYCHAIN_PASSWORD" "$kc" >/dev/null
           # shellcheck disable=SC2046  # una ruta por llavero
           security list-keychains -d user -s "$kc" $(security list-keychains -d user | tr -d '"')
@@ -135,6 +135,10 @@ jobs:
           echo "$out"
           id=$(echo "$out" | plutil -extract id raw -o - - 2>/dev/null || true)
           status=$(echo "$out" | plutil -extract status raw -o - - 2>/dev/null || true)
+          if [[ -z "$status" && -n "$id" ]]; then
+            echo "::error::Apple no terminó de procesar $1 a tiempo (envío $id). La primera notarización de una cuenta puede tardar horas; el envío sigue en la cola. Consulta su estado con el workflow «Estado de notarización» y, cuando esté Accepted, vuelve a lanzar éste."
+            exit 1
+          fi
           if [[ "$status" != Accepted ]]; then
             [[ -n "$id" ]] && xcrun notarytool log "$id" --key "$ASC_KEY_PATH" \
               --key-id "$ASC_KEY_ID" --issuer "$ASC_ISSUER_ID" || true
