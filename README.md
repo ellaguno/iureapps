@@ -105,11 +105,26 @@ Al subir una etiqueta `vX.Y.Z`, o al lanzar `build.yml` a mano con la entrada `r
 | `iureapps-X.Y.Z-1.x86_64.rpm` | Fedora, openSUSE y derivadas (`sudo dnf install ./iureapps-…rpm`) |
 | `iureapps-linux-x64.tar.gz` | cualquier Linux x64 (binario suelto) |
 | `iureapps-windows-x64.exe` | Windows |
-| `iureapps-macos-arm64.tar.gz`, `iureapps-macos-x64.tar.gz` | macOS (Apple Silicon e Intel) |
+| `iureapps-macos-universal.dmg` | macOS (Apple Silicon e Intel), firmado y notarizado |
+| `iureapps-macos-arm64.tar.gz`, `iureapps-macos-x64.tar.gz` | macOS, binario suelto sin firmar |
 
-Los paquetes instalan el binario en `/usr/bin`, la entrada del menú y el icono. En macOS el
-binario no está firmado: la primera vez, clic derecho → Abrir (o
-`xattr -d com.apple.quarantine iureapps`). El icono se regenera con `python3 scripts/icono.py`. El lanzador avisa cuando hay una versión suya más nueva.
+Los paquetes instalan el binario en `/usr/bin`, la entrada del menú y el icono. En macOS,
+el `.dmg` trae `Iurefficient Apps.app` (`com.sesolibre.iureapps`), universal, firmada con
+Developer ID y notarizada: se arrastra a Aplicaciones y abre sin avisos. Los `.tar.gz` de
+macOS no están firmados: la primera vez, clic derecho → Abrir (o
+`xattr -d com.apple.quarantine iureapps`).
+
+### Firma de macOS
+
+`.github/workflows/macos.yml` arma el `.app` (plantilla `assets/macos/Info.plist`; versión de
+`Cargo.toml` y build = número de ejecución), lo firma con hardened runtime, lo notariza con
+`notarytool` y la llave de App Store Connect, lo engrapa y hace lo mismo con el `.dmg`. Los
+secrets se cargan una sola vez desde la máquina con los certificados:
+
+```bash
+scripts/apple-secrets.sh ~/apple-certs
+```
+ El icono (PNG y el `.icns` de macOS) se regenera con `python3 scripts/icono.py`. El lanzador avisa cuando hay una versión suya más nueva.
 
 ## Agregar una app
 

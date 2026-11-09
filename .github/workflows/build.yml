@@ -108,7 +108,11 @@ jobs:
           TAG: ${{ inputs.release != '' && inputs.release || github.ref_name }}
         run: |
           ls -la dist
-          gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1 || \
+          # macos.yml puede estar creando la misma release a la vez: se reintenta.
+          for i in 1 2 3 4 5; do
+            gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1 && break
             gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" \
-              --title "Iurefficient Apps ${TAG#v}" --generate-notes
+              --title "Iurefficient Apps ${TAG#v}" --generate-notes && break
+            sleep $((i * 10))
+          done
           gh release upload "$TAG" dist/* --repo "$GITHUB_REPOSITORY" --clobber

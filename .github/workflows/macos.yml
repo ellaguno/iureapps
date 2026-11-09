@@ -1,0 +1,203 @@
+name: macOS (firmado y notarizado)
+
+# iureapps.app universal (Apple Silicon + Intel) firmada con Developer ID, hardened runtime,
+# notarizada y engrapada, dentro de un .dmg firmado, notarizado y engrapado.
+# Publica el .dmg en la release al subir una etiqueta v* o al lanzarlo a mano con `release`.
+# En ramas, sólo si cambia el empaquetado (este archivo o assets/macos): compila y notariza
+# sin publicar. (Los filtros `paths` no se aplican a las etiquetas.)
+#
+# Secrets (scripts/apple-secrets.sh): APPLE_TEAM_ID, DEVELOPER_ID_P12_BASE64,
+# DEVELOPER_ID_PASSWORD, ASC_KEY_ID, ASC_ISSUER_ID, ASC_PRIVATE_KEY, KEYCHAIN_PASSWORD.
+
+on:
+  push:
+    tags: ["v*"]
+    branches: ["**"]
+    paths:
+      - ".github/workflows/macos.yml"
+      - "assets/macos/**"
+  workflow_dispatch:
+    inputs:
+      release:
+        description: "Versión a publicar (p. ej. v0.1.9); vacío = sólo compilar y notarizar"
+        required: false
+        default: ""
+
+permissions:
+  contents: write
+
+concurrency:
+  group: macos-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  BUNDLE_ID: com.sesolibre.iureapps
+  APP: iureapps.app
+
+jobs:
+  macos:
+    runs-on: macos-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin, x86_64-apple-darwin
+      - uses: swatinem/rust-cache@v2
+
+      - name: Versión
+        id: v
+        run: |
+          version=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "build=${{ github.run_number }}" >> "$GITHUB_OUTPUT"
+          echo "iureapps $version (build ${{ github.run_number }})"
+
+      - name: Compilar (arm64 + x86_64) y unir con lipo
+        env:
+          MACOSX_DEPLOYMENT_TARGET: "10.13"
+        run: |
+          cargo build --release --target aarch64-apple-darwin
+          cargo build --release --target x86_64-apple-darwin
+          mkdir -p build
+          lipo -create -output build/iureapps \
+            target/aarch64-apple-darwin/release/iureapps \
+            target/x86_64-apple-darwin/release/iureapps
+          lipo -info build/iureapps
+
+      - name: Armar iureapps.app
+        run: |
+          app="build/$APP"
+          mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources"
+          cp build/iureapps "$app/Contents/MacOS/iureapps"
+          cp assets/macos/iureapps.icns "$app/Contents/Resources/iureapps.icns"
+          sed -e "s/@VERSION@/${{ steps.v.outputs.version }}/" \
+              -e "s/@BUILD@/${{ steps.v.outputs.build }}/" \
+              assets/macos/Info.plist > "$app/Contents/Info.plist"
+          printf 'APPL????' > "$app/Contents/PkgInfo"
+          plutil -lint "$app/Contents/Info.plist"
+          /usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$app/Contents/Info.plist"
+
+      - name: Llavero temporal con el certificado Developer ID
+        env:
+          P12_BASE64: ${{ secrets.DEVELOPER_ID_P12_BASE64 }}
+          P12_PASSWORD: ${{ secrets.DEVELOPER_ID_PASSWORD }}
+          KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
+          TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          for v in P12_BASE64 P12_PASSWORD KEYCHAIN_PASSWORD TEAM_ID; do
+            [[ -n "${!v}" ]] || { echo "::error::Falta el secret de $v (scripts/apple-secrets.sh)"; exit 1; }
+          done
+          kc="$RUNNER_TEMP/firma.keychain-db"
+          p12="$RUNNER_TEMP/devid.p12"
+          printf '%s' "$P12_BASE64" | base64 --decode > "$p12"
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$kc"
+          security set-keychain-settings -lut 21600 "$kc"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$kc"
+          security import "$p12" -k "$kc" -P "$P12_PASSWORD" -f pkcs12 \
+            -T /usr/bin/codesign -T /usr/bin/security
+          rm -f "$p12"
+          # Intermedio de Developer ID (G2), por si el runner no lo trae.
+          curl -fsSL https://www.apple.com/certificateauthority/DeveloperIDG2CA.cer -o "$RUNNER_TEMP/g2.cer"
+          security import "$RUNNER_TEMP/g2.cer" -k "$kc" || true
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KEYCHAIN_PASSWORD" "$kc" >/dev/null
+          # shellcheck disable=SC2046  # una ruta por llavero
+          security list-keychains -d user -s "$kc" $(security list-keychains -d user | tr -d '"')
+          identity=$(security find-identity -v -p codesigning "$kc" |
+            grep "Developer ID Application" | grep "($TEAM_ID)" | head -1 | awk '{print $2}')
+          [[ -n "$identity" ]] || { security find-identity -v -p codesigning "$kc"; echo "::error::No hay identidad Developer ID Application del equipo"; exit 1; }
+          echo "KEYCHAIN=$kc" >> "$GITHUB_ENV"
+          echo "IDENTITY=$identity" >> "$GITHUB_ENV"
+
+      - name: Llave de App Store Connect (notarytool)
+        env:
+          ASC_PRIVATE_KEY: ${{ secrets.ASC_PRIVATE_KEY }}
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+        run: |
+          for v in ASC_PRIVATE_KEY ASC_KEY_ID ASC_ISSUER_ID; do
+            [[ -n "${!v}" ]] || { echo "::error::Falta el secret $v"; exit 1; }
+          done
+          key="$RUNNER_TEMP/AuthKey_$ASC_KEY_ID.p8"
+          printf '%s\n' "$ASC_PRIVATE_KEY" > "$key"
+          chmod 600 "$key"
+          {
+            echo "ASC_KEY_PATH=$key"
+            echo "ASC_KEY_ID=$ASC_KEY_ID"
+            echo "ASC_ISSUER_ID=$ASC_ISSUER_ID"
+          } >> "$GITHUB_ENV"
+          cat > "$RUNNER_TEMP/notarize.sh" <<'EOF'
+          #!/bin/bash
+          # notarize.sh <archivo>: envía a notarizar, espera y, si falla, muestra el registro.
+          set -euo pipefail
+          out=$(xcrun notarytool submit "$1" --key "$ASC_KEY_PATH" --key-id "$ASC_KEY_ID" \
+            --issuer "$ASC_ISSUER_ID" --wait --timeout 45m --output-format json) || true
+          echo "$out"
+          id=$(echo "$out" | plutil -extract id raw -o - - 2>/dev/null || true)
+          status=$(echo "$out" | plutil -extract status raw -o - - 2>/dev/null || true)
+          if [[ "$status" != Accepted ]]; then
+            [[ -n "$id" ]] && xcrun notarytool log "$id" --key "$ASC_KEY_PATH" \
+              --key-id "$ASC_KEY_ID" --issuer "$ASC_ISSUER_ID" || true
+            echo "::error::Notarización de $1: $status"
+            exit 1
+          fi
+          EOF
+          chmod +x "$RUNNER_TEMP/notarize.sh"
+
+      - name: Firmar la app (Developer ID + hardened runtime)
+        run: |
+          codesign --force --options runtime --timestamp \
+            --keychain "$KEYCHAIN" --sign "$IDENTITY" "build/$APP"
+          codesign --verify --strict --deep --verbose=2 "build/$APP"
+          codesign -dvv "build/$APP" 2>&1 | grep -E 'Identifier|Authority|TeamIdentifier|flags|Timestamp'
+
+      - name: Notarizar y engrapar la app
+        run: |
+          ditto -c -k --keepParent "build/$APP" build/iureapps-app.zip
+          "$RUNNER_TEMP/notarize.sh" build/iureapps-app.zip
+          xcrun stapler staple "build/$APP"
+          xcrun stapler validate "build/$APP"
+          spctl --assess --type execute --verbose=4 "build/$APP"
+
+      - name: Crear, firmar, notarizar y engrapar el .dmg
+        id: dmg
+        run: |
+          dmg="dist/iureapps-macos-universal.dmg"
+          mkdir -p dist build/dmg
+          ditto "build/$APP" "build/dmg/$APP"
+          ln -s /Applications build/dmg/Applications
+          hdiutil create -volname "Iurefficient Apps" -srcfolder build/dmg \
+            -fs HFS+ -format UDZO -ov "$dmg"
+          codesign --force --timestamp --keychain "$KEYCHAIN" --sign "$IDENTITY" "$dmg"
+          "$RUNNER_TEMP/notarize.sh" "$dmg"
+          xcrun stapler staple "$dmg"
+          xcrun stapler validate "$dmg"
+          spctl --assess --type open --context context:primary-signature --verbose=4 "$dmg"
+          shasum -a 256 "$dmg"
+          echo "path=$dmg" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: iureapps-macos-dmg
+          path: dist/*.dmg
+
+      - name: Publicar en la release
+        if: startsWith(github.ref, 'refs/tags/v') || inputs.release != ''
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ inputs.release != '' && inputs.release || github.ref_name }}
+        run: |
+          # build.yml puede estar creando la misma release a la vez: se reintenta.
+          for i in 1 2 3 4 5; do
+            gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1 && break
+            gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" \
+              --title "Iurefficient Apps ${TAG#v}" --generate-notes && break
+            sleep $((i * 10))
+          done
+          gh release upload "$TAG" "${{ steps.dmg.outputs.path }}" --repo "$GITHUB_REPOSITORY" --clobber
+
+      - name: Limpiar llavero y llave
+        if: always()
+        run: |
+          [[ -n "${KEYCHAIN:-}" ]] && security delete-keychain "$KEYCHAIN" || true
+          rm -f "$RUNNER_TEMP"/AuthKey_*.p8 "$RUNNER_TEMP"/devid.p12
