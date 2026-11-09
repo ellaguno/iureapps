@@ -1,7 +1,7 @@
 name: macOS (firmado y notarizado)
 
-# iureapps.app universal (Apple Silicon + Intel) firmada con Developer ID, hardened runtime,
-# notarizada y engrapada, dentro de un .dmg firmado, notarizado y engrapado.
+# iureapps.app universal (Apple Silicon + Intel) firmada con Developer ID y hardened runtime,
+# dentro de un .dmg firmado, notarizado (un solo envío, que cubre la app) y engrapado.
 # Publica el .dmg en la release al subir una etiqueta v* o al lanzarlo a mano con `release`.
 # En ramas, sólo si cambia el empaquetado (este archivo o assets/macos): compila y notariza
 # sin publicar. (Los filtros `paths` no se aplican a las etiquetas.)
@@ -37,7 +37,7 @@ env:
 jobs:
   macos:
     runs-on: macos-latest
-    timeout-minutes: 90
+    timeout-minutes: 160
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -131,7 +131,7 @@ jobs:
           # notarize.sh <archivo>: envía a notarizar, espera y, si falla, muestra el registro.
           set -euo pipefail
           out=$(xcrun notarytool submit "$1" --key "$ASC_KEY_PATH" --key-id "$ASC_KEY_ID" \
-            --issuer "$ASC_ISSUER_ID" --wait --timeout 45m --output-format json) || true
+            --issuer "$ASC_ISSUER_ID" --wait --timeout 2h --output-format json) || true
           echo "$out"
           id=$(echo "$out" | plutil -extract id raw -o - - 2>/dev/null || true)
           status=$(echo "$out" | plutil -extract status raw -o - - 2>/dev/null || true)
@@ -155,14 +155,6 @@ jobs:
           codesign --verify --strict --deep --verbose=2 "build/$APP"
           codesign -dvv "build/$APP" 2>&1 | grep -E 'Identifier|Authority|TeamIdentifier|flags|Timestamp'
 
-      - name: Notarizar y engrapar la app
-        run: |
-          ditto -c -k --keepParent "build/$APP" build/iureapps-app.zip
-          "$RUNNER_TEMP/notarize.sh" build/iureapps-app.zip
-          xcrun stapler staple "build/$APP"
-          xcrun stapler validate "build/$APP"
-          spctl --assess --type execute --verbose=4 "build/$APP"
-
       - name: Crear, firmar, notarizar y engrapar el .dmg
         id: dmg
         run: |
@@ -173,10 +165,15 @@ jobs:
           hdiutil create -volname "Iurefficient Apps" -srcfolder build/dmg \
             -fs HFS+ -format UDZO -ov "$dmg"
           codesign --force --timestamp --keychain "$KEYCHAIN" --sign "$IDENTITY" "$dmg"
+          # Un solo envío: el ticket del .dmg cubre también la app que lleva dentro.
           "$RUNNER_TEMP/notarize.sh" "$dmg"
           xcrun stapler staple "$dmg"
           xcrun stapler validate "$dmg"
           spctl --assess --type open --context context:primary-signature --verbose=4 "$dmg"
+          # La app dentro del .dmg ya notarizado: Gatekeeper la acepta.
+          mnt=$(hdiutil attach -nobrowse -readonly "$dmg" | awk -F'\t' '/\/Volumes\//{print $NF}')
+          spctl --assess --type execute --verbose=4 "$mnt/$APP"
+          hdiutil detach "$mnt"
           shasum -a 256 "$dmg"
           echo "path=$dmg" >> "$GITHUB_OUTPUT"
 
