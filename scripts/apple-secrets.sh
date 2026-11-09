@@ -23,15 +23,25 @@ command -v gh >/dev/null || { echo "Falta gh (GitHub CLI)" >&2; exit 1; }
 command -v openssl >/dev/null || { echo "Falta openssl" >&2; exit 1; }
 gh auth status >/dev/null
 
-read -rsp "Contraseña de devid.p12: " P12_PASSWORD; echo
+# IFS= para no recortar espacios al principio o al final de la contraseña.
+IFS= read -rsp "Contraseña de devid.p12: " P12_PASSWORD; echo
 export P12_PASSWORD
 
 # Lee el .p12 (con -legacy si es de OpenSSL antiguo) y comprueba contraseña y llave privada.
 read_p12() { openssl pkcs12 -in "$P12" -passin env:P12_PASSWORD -nodes "$@" 2>/dev/null; }
 LEGACY=()
-if ! read_p12 >/dev/null; then
-  LEGACY=(-legacy)
-  read_p12 "${LEGACY[@]}" >/dev/null || { echo "Contraseña incorrecta o .p12 ilegible" >&2; exit 1; }
+if ! ERR1=$(openssl pkcs12 -in "$P12" -passin env:P12_PASSWORD -nodes 2>&1 >/dev/null); then
+  if ERR2=$(openssl pkcs12 -in "$P12" -passin env:P12_PASSWORD -nodes -legacy 2>&1 >/dev/null); then
+    LEGACY=(-legacy)
+  else
+    # Los mensajes de openssl no incluyen la contraseña.
+    echo "No se pudo abrir $P12 ($(openssl version))." >&2
+    echo "--- openssl:" >&2; echo "$ERR1" | head -5 >&2
+    echo "--- openssl -legacy:" >&2; echo "$ERR2" | head -5 >&2
+    echo "«Mac verify error» = contraseña incorrecta; «unsupported»/«legacy» = falta el" >&2
+    echo "proveedor legacy de OpenSSL 3 (p. ej. paquete openssl-libs o libssl3 completo)." >&2
+    exit 1
+  fi
 fi
 read_p12 "${LEGACY[@]}" | grep -q "PRIVATE KEY" || { echo "El .p12 no trae la llave privada" >&2; exit 1; }
 read_p12 "${LEGACY[@]}" -nokeys | openssl x509 -noout -subject | grep -q "Developer ID Application" ||
