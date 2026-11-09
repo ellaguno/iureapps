@@ -117,9 +117,11 @@ macOS no están firmados: la primera vez, clic derecho → Abrir (o
 ### Firma de macOS
 
 `.github/workflows/macos.yml` arma el `.app` (plantilla `assets/macos/Info.plist`; versión de
-`Cargo.toml` y build = número de ejecución), lo firma con hardened runtime, lo notariza con
-`notarytool` y la llave de App Store Connect, lo engrapa y hace lo mismo con el `.dmg`. Los
-secrets se cargan una sola vez desde la máquina con los certificados:
+`Cargo.toml` y build = número de ejecución), lo firma con hardened runtime, lo mete en un
+`.dmg` firmado, lo notariza con `notarytool` y la llave de App Store Connect (un solo envío,
+que cubre la app) y lo engrapa. Si Apple tarda, el workflow «Estado de notarización» consulta
+los envíos desde Linux. Los secrets se cargan una sola vez desde la máquina con los
+certificados (usa `apple_devid.key` y su `.cer`, o `devid.p12`):
 
 ```bash
 scripts/apple-secrets.sh ~/apple-certs
