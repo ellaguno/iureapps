@@ -5,6 +5,9 @@ name: Estado de notarización
 # puede tardar horas, sin tener ocupada una máquina macOS.
 
 on:
+  # Al cambiar este archivo sólo lista (y así GitHub registra el workflow fuera de main).
+  push:
+    paths: [".github/workflows/notary-status.yml"]
   workflow_dispatch:
     inputs:
       id:
