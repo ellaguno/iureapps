@@ -19,7 +19,7 @@ on:
   workflow_dispatch:
     inputs:
       release:
-        description: "Versión a publicar (p. ej. v0.1.9); vacío = sólo compilar y notarizar"
+        description: "Versión a publicar (p. ej. v0.1.10); vacío = sólo compilar y notarizar"
         required: false
         default: ""
 
@@ -40,6 +40,17 @@ jobs:
     timeout-minutes: 160
     steps:
       - uses: actions/checkout@v4
+      - name: La etiqueta coincide con la versión de Cargo.toml
+        if: startsWith(github.ref, 'refs/tags/v') || inputs.release != ''
+        env:
+          TAG: ${{ inputs.release != '' && inputs.release || github.ref_name }}
+        shell: bash
+        run: |
+          version=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)
+          if [[ "${TAG#v}" != "$version" ]]; then
+            echo "::error::La etiqueta $TAG no coincide con Cargo.toml ($version): sube la versión antes de etiquetar."
+            exit 1
+          fi
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: aarch64-apple-darwin, x86_64-apple-darwin
