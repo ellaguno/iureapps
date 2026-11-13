@@ -222,10 +222,13 @@ fn detect_mac(app: &AppDef) -> Option<Installed> {
 }
 
 fn mac_bundle_version(app: &Path) -> Option<String> {
+    mac_bundle_key(app, "CFBundleShortVersionString")
+}
+
+/// Valor de texto de una clave del `Info.plist` (en XML) de la `.app`.
+fn mac_bundle_key(app: &Path, key: &str) -> Option<String> {
     let plist = std::fs::read_to_string(app.join("Contents/Info.plist")).ok()?;
-    let after = plist
-        .split("<key>CFBundleShortVersionString</key>")
-        .nth(1)?;
+    let after = plist.split(&format!("<key>{key}</key>")).nth(1)?;
     let start = after.find("<string>")? + "<string>".len();
     let end = after[start..].find("</string>")?;
     Some(after[start..start + end].trim().to_string())
@@ -783,6 +786,15 @@ pub fn uninstall(app: &AppDef, installed: &Installed) -> Result<(), String> {
             Ok(())
         }
         (Format::MacApp, Launch::MacApp(p)) => {
+            // el arranque con la sesión que haya creado la app (IureVoz lo nombra con su
+            // CFBundleIdentifier) apuntaría a una app que ya no existe
+            if let (Some(id), Some(home)) = (mac_bundle_key(p, "CFBundleIdentifier"), util::home())
+            {
+                let _ = std::fs::remove_file(
+                    home.join("Library/LaunchAgents")
+                        .join(format!("{id}.plist")),
+                );
+            }
             std::fs::remove_dir_all(p).map_err(|e| e.to_string())
         }
         (Format::TarGz, Launch::Exec(p)) => {

@@ -12,8 +12,8 @@ pub enum Packaging {
     /// Instaladores de Tauri con el esquema de nombres de arriba.
     Tauri,
     /// IureVoz: cargo-deb, cargo-generate-rpm, Inno Setup y WiX con el esquema de nombres de
-    /// Tauri (`IureVoz-<ver>-linux-x64.deb`, `-linux-x64.rpm`, `-windows-x64.exe`) y
-    /// `SHA256SUMS`. El `.exe` es de Inno Setup: se instala con `/VERYSILENT`, no con `/S`.
+    /// Tauri (`IureVoz-<ver>-linux-x64.deb`, `-linux-x64.rpm`, `-windows-x64.exe`,
+    /// `-macos-universal.app.tar.gz`) y `SHA256SUMS`. El `.exe` es de Inno Setup: se instala con `/VERYSILENT`, no con `/S`.
     Inno,
     /// Apps en Rust de la suite (`cargo xtask dist` / `package`), con `SHA256SUMS`:
     /// `<bin>-<ver>-x86_64-linux.tar.gz` y, con cargo-packager, `<bin>_<ver>_x86_64.AppImage`,
@@ -127,16 +127,16 @@ pub static APPS: &[AppDef] = &[
         repo: "ellaguno/iurevoz",
         description: "Dictado y control del escritorio por voz, local y sólo CPU.",
         tagline: "Dictado por voz",
-        hint: "Local y sin GPU; GNOME en Wayland y Windows",
+        hint: "Local y sin GPU; GNOME en Wayland, Windows y macOS",
         accent: [139, 92, 246],
         experimental: false,
         packaging: Packaging::Inno,
-        // macOS se agrega cuando IureVoz tenga versión para Mac.
-        oses: &[Os::Linux, Os::Windows],
+        // macOS desde la 0.4.0 (app universal; las versiones anteriores no la publicaron).
+        oses: ALL,
         gpu_variants: false,
         linux_bins: &["iurevoz"],
         pubkey: None,
-        note: "Versión alfa. En Linux, pensado para GNOME en Wayland; en Windows se instala para el usuario.",
+        note: "Versión alfa. En Linux, pensado para GNOME en Wayland; en Windows se instala para el usuario; en macOS pide permiso de micrófono y de Accesibilidad (para escribir lo dictado).",
     },
     AppDef {
         id: "iuredesk",
@@ -663,6 +663,8 @@ mod tests {
             "IureVoz-0.3.0-windows-x64.exe",
             "IureVoz-0.3.0-windows-x64.msi",
             "IureVoz-0.3.0-windows-x64.zip",
+            "IureVoz-0.3.0-macos-universal.dmg",
+            "IureVoz-0.3.0-macos-universal.app.tar.gz",
             "SHA256SUMS",
         ];
         let r = Release {
@@ -694,9 +696,14 @@ mod tests {
             "IureVoz-0.3.0-windows-x64.exe"
         );
         assert!(n(Os::Linux, Arch::X64, Format::AppImage).is_none());
-        assert!(!find("iurevoz")
-            .unwrap()
-            .supports(&sys(Os::MacOs, Arch::Arm64)));
+        // la misma app universal en Apple Silicon y en Intel
+        for arch in [Arch::Arm64, Arch::X64] {
+            assert!(find("iurevoz").unwrap().supports(&sys(Os::MacOs, arch)));
+            assert_eq!(
+                n(Os::MacOs, arch, Format::MacApp).unwrap(),
+                "IureVoz-0.3.0-macos-universal.app.tar.gz"
+            );
+        }
     }
 
     /// Nombres que publica `cargo xtask package` de IureDesk (esquema de Tauri).
