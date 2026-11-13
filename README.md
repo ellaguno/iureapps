@@ -40,7 +40,7 @@ Qué hace:
 | Linux | `.tar.gz` con los binarios (IureProject) | `~/.local/share/iureapps/apps/<app>/` + entrada en el menú |
 | Linux | `.deb` / `.rpm` (CUDA, IureVoz, o si no hay FUSE) | `pkexec apt-get install` / `dnf install` |
 | Windows | instalador `.exe` en modo silencioso: NSIS (`/S`) o Inno Setup en IureVoz (`/VERYSILENT`) | lo que defina cada app (IureDav pide administrador; IureVoz, sólo el usuario) |
-| macOS | `.app.tar.gz` (o `.dmg` en IureDesk) | `/Applications` o `~/Applications`, sin cuarentena |
+| macOS | `.app.tar.gz` (IureVoz, apps Tauri) o `.dmg` (IureDesk) | `/Applications` o `~/Applications`, sin cuarentena |
 
 Sin `libfuse2` los AppImage se ejecutan con `APPIMAGE_EXTRACT_AND_RUN=1`.
 
