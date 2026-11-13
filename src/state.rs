@@ -73,11 +73,20 @@ pub fn version_cmp(a: &str, b: &str) -> std::cmp::Ordering {
 fn pre(v: &str) -> Option<Vec<&str>> {
     let v = v.trim().trim_start_matches('v');
     let rest = v.trim_start_matches(|c: char| c.is_ascii_digit() || c == '.');
-    let rest = rest.strip_prefix('-')?;
-    // Sin letra al principio es la revisión de Debian/RPM (`-1`), no una preliminar.
-    if !rest.starts_with(|c: char| c.is_ascii_alphabetic()) {
-        return None;
-    }
+    // `~` es la preliminar en Debian y RPM: el .deb y el .rpm de IureProject registran
+    // `0.2.0~alpha.24` para la etiqueta `v0.2.0-alpha.24`.
+    let rest = match rest.strip_prefix('~') {
+        // Lo que sigue a un `-` es la revisión del paquete (`0.2.0~alpha.24-1`).
+        Some(r) => r.split('-').next().unwrap_or(r),
+        None => {
+            let r = rest.strip_prefix('-')?;
+            // Sin letra al principio es la revisión de Debian/RPM (`-1`), no una preliminar.
+            if !r.starts_with(|c: char| c.is_ascii_alphabetic()) {
+                return None;
+            }
+            r
+        }
+    };
     let rest = rest.split('+').next().unwrap_or(rest);
     Some(rest.split(['.', '-']).filter(|s| !s.is_empty()).collect())
 }
@@ -148,5 +157,10 @@ mod tests {
         assert_eq!(version_cmp("0.1.0-alpha", "0.1.0-alpha.1"), Less);
         // La revisión de Debian sigue sin contar.
         assert_eq!(version_cmp("0.2.1-1", "0.2.1"), Equal);
+        // Preliminar con `~` (versión de dpkg/rpm del .deb y el .rpm de IureProject).
+        assert_eq!(version_cmp("0.2.0~alpha.23", "0.2.0-alpha.24"), Less);
+        assert_eq!(version_cmp("0.2.0~alpha.24", "v0.2.0-alpha.24"), Equal);
+        assert_eq!(version_cmp("0.2.0~alpha.24-1", "0.2.0-alpha.24"), Equal);
+        assert_eq!(version_cmp("0.2.0~alpha.24", "0.2.0"), Less);
     }
 }
