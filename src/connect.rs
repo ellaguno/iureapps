@@ -3,10 +3,10 @@
 //! El lanzador hace lo mismo que cada app al iniciar sesión: guarda la sesión REST en
 //! el llavero del sistema (entrada compartida), crea una contraseña de aplicación
 //! WebDAV si no hay ninguna y deja la cuenta como «cuenta activa». Así IureDav,
-//! IureTranscribe, IureOCR e iureditor arrancan ya conectadas.
+//! IureTranscribe, IureOCR, iureditor, IureDesk e IureProject arrancan ya conectadas.
 
 use iurefficient_connect::account::{self, ActiveAccount};
-use iurefficient_connect::rest::{Login, Session, User};
+use iurefficient_connect::rest::{ApiError, Login, Session, User};
 use iurefficient_connect::{api, lang, secrets, user_agent, Account};
 
 const APP_NAME: &str = "Iurefficient Apps";
@@ -53,6 +53,17 @@ fn runtime() -> Result<tokio::runtime::Runtime, String> {
 }
 
 fn err(e: anyhow::Error) -> String {
+    // Desde la v4.114 la instancia responde 403 `terms_acceptance_required` mientras no se
+    // acepten los términos vigentes: eso se resuelve en la web, no reintentando.
+    if let Some(api) = e.downcast_ref::<ApiError>() {
+        if api.is_terms_required() {
+            return format!(
+                "Tu cuenta debe aceptar los términos vigentes de Iurefficient: entra a la web de tu \
+                 instancia, acéptalos y vuelve a intentarlo. ({})",
+                api.message
+            );
+        }
+    }
     format!("{e:#}")
 }
 

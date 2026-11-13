@@ -168,13 +168,13 @@ pub static APPS: &[AppDef] = &[
         accent: [34, 197, 94],
         experimental: false,
         packaging: Packaging::Packager,
-        // Windows: el .msi desde la 0.2.0-alpha.15. macOS (.dmg) falta probarlo en un Mac.
-        oses: &[Os::Linux, Os::Windows],
+        // Windows: el .msi desde la 0.2.0-alpha.15. macOS: .dmg universal, firmado y notarizado.
+        oses: ALL,
         gpu_variants: false,
         linux_bins: &["iureproject"],
         pubkey: None,
         note:
-            "Versión alfa. Linux x64 (.deb o .tar.gz) y Windows (.msi); macOS, en su página de descargas.",
+            "Versión alfa. Linux x64 (.deb, .rpm o .tar.gz), Windows (.msi) y macOS (.dmg universal).",
     },
 ];
 
@@ -392,6 +392,9 @@ impl AppDef {
                     (Os::Linux, Arch::X64, Format::Deb) => &["_amd64.deb"],
                     (Os::Linux, Arch::Arm64, Format::AppImage) => &["_aarch64.AppImage"],
                     (Os::Linux, Arch::Arm64, Format::Deb) => &["_arm64.deb"],
+                    // El .rpm de `cargo xtask dist` de IureProject (`iureproject-<v>-1.x86_64.rpm`).
+                    (Os::Linux, Arch::X64, Format::Rpm) => &[".x86_64.rpm"],
+                    (Os::Linux, Arch::Arm64, Format::Rpm) => &[".aarch64.rpm"],
                     (Os::Linux, Arch::X64, Format::TarGz) => &["-x86_64-linux.tar.gz"],
                     (Os::Linux, Arch::Arm64, Format::TarGz) => &["-aarch64-linux.tar.gz"],
                     (Os::Windows, Arch::Arm64, Format::WinExe) => {
@@ -400,8 +403,14 @@ impl AppDef {
                     (Os::Windows, _, Format::WinExe) => &["_x64-setup.exe"],
                     // El .msi de `cargo xtask dist` de IureProject (x64; Windows ARM lo emula).
                     (Os::Windows, _, Format::Msi) => &["-x86_64-windows.msi"],
-                    (Os::MacOs, Arch::Arm64, Format::MacApp) => &["_aarch64.dmg", "_universal.dmg"],
-                    (Os::MacOs, Arch::X64, Format::MacApp) => &["_x64.dmg", "_universal.dmg"],
+                    // `cargo xtask dist --target macos` de IureProject: la `.app` universal en
+                    // `iureproject-<v>-macos-universal.dmg`.
+                    (Os::MacOs, Arch::Arm64, Format::MacApp) => {
+                        &["_aarch64.dmg", "_universal.dmg", "-macos-universal.dmg"]
+                    }
+                    (Os::MacOs, Arch::X64, Format::MacApp) => {
+                        &["_x64.dmg", "_universal.dmg", "-macos-universal.dmg"]
+                    }
                     _ => return None,
                 };
                 ends.iter()
@@ -754,6 +763,57 @@ mod tests {
             .unwrap();
         assert_eq!(sig.unwrap().name, format!("{v}-linux-x64.AppImage.sig"));
         assert!(app.pubkey.is_some());
+    }
+
+    /// Lo que publica hoy `cargo xtask dist` de IureProject (Linux, Windows y macOS).
+    #[test]
+    fn picks_iureproject_dist() {
+        let v = "0.2.0-alpha.24";
+        let names = [
+            format!("iureproject-{v}-x86_64-linux.tar.gz"),
+            "iureproject_0.2.0.alpha.24_amd64.deb".to_string(),
+            "iureproject-0.2.0.alpha.24-1.x86_64.rpm".to_string(),
+            format!("iureproject-{v}-x86_64-windows.zip"),
+            format!("iureproject-{v}-x86_64-windows.msi"),
+            format!("iureproject-{v}-macos-universal.zip"),
+            format!("iureproject-{v}-macos-universal.dmg"),
+            "SHA256SUMS".to_string(),
+        ];
+        let r = Release {
+            tag_name: format!("v{v}"),
+            html_url: String::new(),
+            body: None,
+            published_at: None,
+            assets: names
+                .iter()
+                .map(|n| Asset {
+                    name: n.clone(),
+                    size: 1,
+                    browser_download_url: String::new(),
+                    url: String::new(),
+                })
+                .collect(),
+        };
+        let p = |s: &SystemInfo, f| pick("iureproject", &r, s, Variant::Cpu, f);
+        let linux = sys(Os::Linux, Arch::X64);
+        assert_eq!(
+            p(&linux, Format::Rpm).unwrap(),
+            "iureproject-0.2.0.alpha.24-1.x86_64.rpm"
+        );
+        assert_eq!(
+            p(&linux, Format::Deb).unwrap(),
+            "iureproject_0.2.0.alpha.24_amd64.deb"
+        );
+        assert!(p(&linux, Format::AppImage).is_none());
+        for arch in [Arch::Arm64, Arch::X64] {
+            assert_eq!(
+                p(&sys(Os::MacOs, arch), Format::MacApp).unwrap(),
+                format!("iureproject-{v}-macos-universal.dmg")
+            );
+        }
+        assert!(find("iureproject")
+            .unwrap()
+            .supports(&sys(Os::MacOs, Arch::Arm64)));
     }
 
     #[test]
