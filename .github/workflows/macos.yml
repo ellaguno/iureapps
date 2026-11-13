@@ -19,7 +19,7 @@ on:
   workflow_dispatch:
     inputs:
       release:
-        description: "Versión a publicar (p. ej. v0.1.10); vacío = sólo compilar y notarizar"
+        description: "Versión a publicar (p. ej. v0.1.11); vacío = sólo compilar y notarizar"
         required: false
         default: ""
 
