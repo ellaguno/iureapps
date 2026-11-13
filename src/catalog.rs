@@ -156,7 +156,7 @@ pub static APPS: &[AppDef] = &[
         gpu_variants: false,
         linux_bins: &["iuredesk"],
         pubkey: Some(KEY_3B1C),
-        note: "Versión alfa. Windows: instalador .exe (por usuario) o .msi (para todo el equipo).",
+        note: "Versión beta. Windows: instalador .exe (por usuario) o .msi (para todo el equipo).",
     },
     AppDef {
         id: "iureproject",

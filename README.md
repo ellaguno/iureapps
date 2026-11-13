@@ -29,8 +29,8 @@ Qué hace:
   IureOCR e iureditor la toman al abrirse si no tienen otra configurada. «Abrir
   Iurefficient» abre la instancia en el navegador.
 - **Verifica la firma minisign** (`.sig`) de cada instalador con la clave pública del
-  actualizador de cada app antes de instalarlo; las apps que no firman (IureDesk) se
-  comprueban contra el `SHA256SUMS` de su release.
+  actualizador de cada app antes de instalarlo (IureDesk con su propia clave minisign); las
+  que no firman (IureVoz, IureProject) se comprueban contra el `SHA256SUMS` de su release.
 
 ## Cómo instala en cada sistema
 
