@@ -20,7 +20,7 @@ base64 = "0.22"
 sha2 = "0.10"
 png = "0.18"
 # Cuenta compartida con las demás apps (mismo llavero y «cuenta activa»).
-iurefficient-connect = { git = "https://github.com/ellaguno/iurefficient-connect", tag = "v0.7.1" }
+iurefficient-connect = { git = "https://github.com/ellaguno/iurefficient-connect", tag = "v0.9.1" }
 tokio = { version = "1", features = ["rt"] }
 anyhow = "1"
 
