@@ -1,5 +1,6 @@
 //! Interfaz gráfica (egui): mosaico de apps con su icono, estado y acciones.
 
+mod detail;
 mod theme;
 mod view;
 
@@ -11,6 +12,7 @@ use crate::plan::{self, Status};
 use crate::state::{version_cmp, Managed, State};
 use crate::system::SystemInfo;
 use eframe::egui::{self, RichText};
+use std::collections::HashMap;
 use std::sync::mpsc::{channel, Receiver, Sender};
 use std::time::Instant;
 
@@ -28,6 +30,7 @@ enum Msg {
     AccountVerified(Result<String, String>),
     LoginDone(Result<connect::LoginOutcome, String>),
     LogoutDone(Result<(), String>),
+    Shots(usize, Result<Vec<(String, egui::ColorImage)>, String>),
 }
 
 /// Estado de la cuenta de Iurefficient compartida.
@@ -78,6 +81,21 @@ enum Filter {
     NotInstalled,
 }
 
+/// Ficha abierta en lugar del mosaico.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Selected {
+    Account,
+    App(usize),
+}
+
+/// Capturas de la ficha de una app.
+enum Shots {
+    Loading,
+    /// Pie de foto y textura; vacía si la app no publica capturas.
+    Ready(Vec<(String, egui::TextureHandle)>),
+    Failed(String),
+}
+
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum ViewMode {
     Grid,
@@ -107,6 +125,10 @@ pub struct LauncherApp {
     account: AccountState,
     login: Option<LoginForm>,
     confirm_logout: bool,
+    selected: Option<Selected>,
+    shots: HashMap<usize, Shots>,
+    /// Captura ampliada: (app, índice).
+    viewer: Option<(usize, usize)>,
 }
 
 pub fn run() -> Result<(), String> {
@@ -191,6 +213,9 @@ impl LauncherApp {
             account: AccountState::default(),
             login: None,
             confirm_logout: false,
+            selected: None,
+            shots: HashMap::new(),
+            viewer: None,
         };
         app.spawn_system();
         app.load_account();
@@ -300,6 +325,30 @@ impl LauncherApp {
                     }
                 }
                 Msg::LoginDone(r) => self.login_done(r),
+                Msg::Shots(i, r) => {
+                    let shots = match r {
+                        Ok(images) => Shots::Ready(
+                            images
+                                .into_iter()
+                                .enumerate()
+                                .map(|(k, (caption, img))| {
+                                    let name = format!("shot-{}-{k}", APPS[i].id);
+                                    let tex = self.ctx.load_texture(
+                                        name,
+                                        img,
+                                        egui::TextureOptions::LINEAR,
+                                    );
+                                    (caption, tex)
+                                })
+                                .collect(),
+                        ),
+                        Err(e) => {
+                            self.log.push(format!("{}: capturas: {e}", APPS[i].name));
+                            Shots::Failed(e)
+                        }
+                    };
+                    self.shots.insert(i, shots);
+                }
                 Msg::LogoutDone(r) => {
                     self.account.busy = false;
                     match r {
@@ -417,6 +466,24 @@ impl LauncherApp {
                 Err(e) => self.rows[i].error = Some(e),
             }
         }
+    }
+
+    /// Descarga (o lee de la caché) las capturas de la app `i`, una vez por sesión.
+    fn load_shots(&mut self, i: usize) {
+        if self.shots.contains_key(&i) {
+            return;
+        }
+        self.shots.insert(i, Shots::Loading);
+        let (tx, ctx, token) = (self.tx.clone(), self.ctx.clone(), self.token());
+        std::thread::spawn(move || {
+            let r = crate::shots::load(&APPS[i], token.as_deref()).map(|shots| {
+                shots
+                    .into_iter()
+                    .filter_map(|s| Some((s.caption, theme::decode_shot(&s.png)?)))
+                    .collect()
+            });
+            Self::send(&tx, &ctx, Msg::Shots(i, r));
+        });
     }
 
     fn load_account(&self) {

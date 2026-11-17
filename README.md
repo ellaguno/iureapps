@@ -4,9 +4,15 @@ Lanzador e instalador ligero, en Rust, de las apps de escritorio de
 [Iurefficient](https://iurefficient.com): **iureditor, IureTranscribe, IureOCR, IureDav,
 IureVoz, IureDesk e IureProject**. Un solo ejecutable (~7 MB) para Linux, Windows y macOS.
 
-La ventana muestra las apps en **mosaico** (o en tabla): icono, nombre con el color de cada
-app, estado, versión, aceleración elegida y la acción principal (instalar, actualizar o
-abrir), con filtros (todas, instaladas, actualizaciones, no instaladas) y búsqueda.
+La ventana muestra las apps en **mosaico** (o en tabla), como el cajón de apps de GNOME:
+icono, nombre y un distintivo de estado en la esquina del icono (✓ instalada, ↑ actualización,
+↓ disponible, ⊘ no disponible, con el icono atenuado), con filtros (todas, instaladas,
+actualizaciones, no instaladas) y búsqueda. Un clic abre la **ficha** de la app: portada con su
+color, la acción principal (Abrir en verde, Instalar en azul, Actualizar en ámbar),
+Desinstalar, aceleración y formato, capturas de pantalla (un clic las amplía), versión
+instalada y última, tamaño del instalador y novedades. Esc o «‹ Todas las apps» vuelve al
+mosaico; el clic derecho en un icono ofrece la acción principal y Desinstalar sin abrir la
+ficha.
 
 Qué hace:
 
@@ -65,6 +71,25 @@ IureDesk publica sus instaladores (firmados con minisign) en su propio repo,
 `ellaguno/iureproject-releases`. Para repos privados, configura un token de GitHub de
 sólo lectura en *Ajustes* o con la variable `IUREAPPS_GITHUB_TOKEN`. El token también sube
 el límite de la API de 60 a 5000 consultas por hora.
+
+## Capturas de cada app
+
+La ficha muestra las capturas que cada app anuncia en un `iureapps.json` en la raíz de su repo
+(rama por defecto). Es opcional: sin él, la ficha dice que la app todavía no publica capturas.
+
+```json
+{
+  "screenshots": [
+    { "url": "screenshots/editor.png", "caption": "Edición con vista previa" },
+    { "url": "screenshots/exportar.png", "caption": "Exportar a Word y PDF" }
+  ]
+}
+```
+
+`url` es una ruta dentro del repo o una URL `https://` completa. Sólo PNG, hasta 6 capturas de
+8 MB y 4096 px por lado como mucho. Se descargan de `raw.githubusercontent.com` (con el token de
+GitHub si hay, para repos privados) al abrir la ficha, una vez por sesión o al pulsar
+*Comprobar*, y se guardan en `<datos>/shots/<app>/` para verlas sin conexión.
 
 ## Recursos
 

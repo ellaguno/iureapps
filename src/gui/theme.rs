@@ -186,6 +186,11 @@ impl Icons {
         }
     }
 
+    /// Textura del icono de `app_id`, si la app publica uno.
+    pub fn texture(&self, app_id: &str) -> Option<&TextureHandle> {
+        self.textures.get(app_id)
+    }
+
     /// Logotipo de Iurefficient de `height` puntos de alto (el texto «Iurefficient» si faltara).
     pub fn logo(&self, ui: &mut egui::Ui, height: f32) -> egui::Response {
         match &self.logo {
@@ -211,6 +216,12 @@ pub fn window_icon() -> Option<egui::IconData> {
         width: img.size[0] as u32,
         height: img.size[1] as u32,
     })
+}
+
+/// Decodifica una captura de pantalla (PNG); `None` si no lo es o es desmesurada.
+pub fn decode_shot(bytes: &[u8]) -> Option<egui::ColorImage> {
+    let img = decode_png(bytes)?;
+    (img.size[0] <= 4096 && img.size[1] <= 4096 && img.size[0] * img.size[1] > 0).then_some(img)
 }
 
 fn decode_png(bytes: &[u8]) -> Option<egui::ColorImage> {

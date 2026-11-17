@@ -1,21 +1,119 @@
 //! Dibujo de la ventana: cabecera, filtros, mosaico (o tabla) y barra de estado.
 
-use super::theme::{self, BG, BRAND, ERROR, FAINT, INFO, LINE, MUTED, OK, SURFACE, TEXT, WARN};
-use super::{Filter, LauncherApp, ViewMode};
+use super::theme::{
+    self, BG, BRAND, ERROR, FAINT, INFO, LINE, MUTED, OK, SURFACE, SURFACE_HI, TEXT, WARN,
+};
+use super::{Filter, LauncherApp, Selected, ViewMode};
 use crate::catalog::{AppDef, Format, APPS};
 use crate::plan::{self, Status};
 use crate::system::{Os, SystemInfo};
 use eframe::egui::{
-    self, pos2, text::LayoutJob, vec2, Align, Align2, Color32, CornerRadius, FontId, Layout, Rect,
-    RichText, Sense, Stroke, StrokeKind, TextFormat, Ui, UiBuilder,
+    self, pos2, text::LayoutJob, vec2, Align, Color32, CornerRadius, FontId, Layout, Rect,
+    RichText, Sense, Stroke, StrokeKind, TextFormat, Ui,
 };
 
-const TILE_MIN_W: f32 = 330.0;
-const TILE_H: f32 = 292.0;
-const PAD: f32 = 20.0;
+const CELL_W: f32 = 136.0;
+const CELL_H: f32 = 156.0;
+const CELL_ICON: f32 = 72.0;
+
+/// Distintivo de estado en la esquina del icono.
+#[derive(Clone, Copy)]
+pub(super) enum Badge {
+    /// Instalada (✓ verde).
+    Ok,
+    /// Actualización (↑ ámbar).
+    Update,
+    /// Disponible para instalar (↓ azul).
+    Get,
+    /// No disponible (⊘ gris).
+    No,
+    /// Hay que atender algo (! ámbar).
+    Warn,
+}
+
+/// Lo que pinta una celda del mosaico.
+struct Cell {
+    icon_id: &'static str,
+    accent: Color32,
+    name: LayoutJob,
+    /// Texto bajo el nombre y su color (estado o para qué sirve la app).
+    line: (String, Color32),
+    badge: Option<Badge>,
+    /// Icono atenuado: no se puede instalar.
+    dim: bool,
+    /// Barra de avance en lugar del texto, mientras instala.
+    progress: Option<f32>,
+}
+
+/// Acción principal de una app.
+#[derive(Clone, Copy)]
+pub(super) enum Action {
+    Open,
+    Install,
+    Update,
+}
+
+/// Círculo de color con un glifo dibujado (no depende de que la fuente lo tenga) y un aro
+/// del color de fondo para separarlo del icono.
+pub(super) fn paint_badge(
+    painter: &egui::Painter,
+    c: egui::Pos2,
+    r: f32,
+    badge: Badge,
+    bg: Color32,
+) {
+    let fill = match badge {
+        Badge::Ok => OK,
+        Badge::Update | Badge::Warn => WARN,
+        Badge::Get => INFO,
+        Badge::No => FAINT,
+    };
+    painter.circle(c, r, fill, Stroke::new(r * 0.24, bg));
+    let s = Stroke::new((r * 0.18).max(1.6), Color32::WHITE);
+    let k = r * 0.45;
+    match badge {
+        Badge::Ok => {
+            painter.line(
+                vec![
+                    c + vec2(-k, 0.0),
+                    c + vec2(-k * 0.3, k * 0.7),
+                    c + vec2(k, -k * 0.6),
+                ],
+                s,
+            );
+        }
+        Badge::Update | Badge::Get => {
+            let dir = if matches!(badge, Badge::Update) {
+                -1.0
+            } else {
+                1.0
+            };
+            painter.line_segment([c + vec2(0.0, -k * dir), c + vec2(0.0, k * dir)], s);
+            painter.line(
+                vec![
+                    c + vec2(-k * 0.75, k * 0.1 * dir),
+                    c + vec2(0.0, k * dir),
+                    c + vec2(k * 0.75, k * 0.1 * dir),
+                ],
+                s,
+            );
+        }
+        Badge::No => {
+            painter.circle_stroke(c, k, s);
+            painter.line_segment(
+                [c + vec2(-k * 0.7, k * 0.7), c + vec2(k * 0.7, -k * 0.7)],
+                s,
+            );
+        }
+        Badge::Warn => {
+            painter.line_segment([c + vec2(0.0, -k), c + vec2(0.0, k * 0.25)], s);
+            painter.circle_filled(c + vec2(0.0, k * 0.8), s.width * 0.6, Color32::WHITE);
+        }
+    }
+}
 
 /// Texto en mayúsculas con espaciado, al estilo de las etiquetas de la interfaz.
-fn caps(text: &str, size: f32, color: Color32) -> LayoutJob {
+pub(super) fn caps(text: &str, size: f32, color: Color32) -> LayoutJob {
     let mut job = LayoutJob::default();
     job.append(
         &text.to_uppercase(),
@@ -30,13 +128,13 @@ fn caps(text: &str, size: f32, color: Color32) -> LayoutJob {
     job
 }
 
-fn caps_label(ui: &mut Ui, text: &str, size: f32, color: Color32) -> egui::Response {
+pub(super) fn caps_label(ui: &mut Ui, text: &str, size: f32, color: Color32) -> egui::Response {
     ui.label(caps(text, size, color))
 }
 
 /// Botón pintado a mano: a diferencia de `egui::Button` con `fill`, conserva el cambio al
 /// pasar el ratón y al pulsar (se oscurece y se hunde 1 px), con cursor de mano.
-fn press_button(
+pub(super) fn press_button(
     ui: &mut Ui,
     job: LayoutJob,
     fill: Color32,
@@ -93,7 +191,12 @@ fn press_button(
 }
 
 /// Botón plano con texto en mayúsculas; `fill` da el botón principal (fondo claro).
-fn flat_button(ui: &mut Ui, text: &str, fill: Option<Color32>, min: egui::Vec2) -> egui::Response {
+pub(super) fn flat_button(
+    ui: &mut Ui,
+    text: &str,
+    fill: Option<Color32>,
+    min: egui::Vec2,
+) -> egui::Response {
     let fg = if fill.is_some() { BG } else { TEXT };
     let radius = ui.visuals().widgets.inactive.corner_radius;
     match fill {
@@ -137,7 +240,7 @@ fn segmented(ui: &mut Ui, items: &[(String, bool)]) -> Option<usize> {
 }
 
 /// «2026-10-21» → «21 oct 2026».
-fn nice_date(iso: &str) -> String {
+pub(super) fn nice_date(iso: &str) -> String {
     const M: [&str; 12] = [
         "ene", "feb", "mar", "abr", "may", "jun", "jul", "ago", "sep", "oct", "nov", "dic",
     ];
@@ -155,7 +258,7 @@ fn nice_date(iso: &str) -> String {
 }
 
 /// Nombre a dos tonos: «Iure» en blanco y el resto en el color de la app.
-fn two_tone(name: &str, size: f32, accent: Color32) -> LayoutJob {
+pub(super) fn two_tone(name: &str, size: f32, accent: Color32) -> LayoutJob {
     let split = name
         .char_indices()
         .nth(4)
@@ -172,7 +275,7 @@ fn two_tone(name: &str, size: f32, accent: Color32) -> LayoutJob {
     job
 }
 
-fn status_style(status: &Status) -> (Color32, &'static str) {
+pub(super) fn status_style(status: &Status) -> (Color32, &'static str) {
     match status {
         Status::NotInstalled => (INFO, "Disponible para instalar"),
         Status::UpToDate | Status::InstalledUnknown => (OK, "Instalada"),
@@ -181,15 +284,6 @@ fn status_style(status: &Status) -> (Color32, &'static str) {
         Status::Unavailable => (FAINT, "Sin versión publicada"),
         Status::Unsupported => (FAINT, "No disponible en este sistema"),
     }
-}
-
-fn chip(ui: &mut Ui, text: &str, color: Color32) {
-    egui::Frame::new()
-        .stroke(Stroke::new(1.0, color.gamma_multiply(0.7)))
-        .inner_margin(egui::Margin::symmetric(6, 3))
-        .show(ui, |ui| {
-            ui.label(caps(text, 10.0, color));
-        });
 }
 
 impl LauncherApp {
@@ -254,6 +348,7 @@ impl LauncherApp {
                     .clicked()
                 {
                     self.refresh_releases();
+                    self.shots.clear();
                     for i in 0..APPS.len() {
                         self.redetect(i);
                     }
@@ -270,6 +365,7 @@ impl LauncherApp {
                     ],
                 );
                 if let Some(k) = pick {
+                    self.selected = None;
                     self.view = if k == 0 {
                         ViewMode::Table
                     } else {
@@ -432,15 +528,15 @@ impl LauncherApp {
             let apps = items.iter().filter(|i| i.is_some()).count();
             Self::section_title(ui, n, title, apps);
             let width = ui.available_width();
-            let cols = ((width / TILE_MIN_W).floor() as usize).clamp(1, 4);
-            let tile_w = (width / cols as f32).floor();
+            let cols = ((width / CELL_W).floor() as usize).max(1);
+            let cell_w = (width / cols as f32).floor().min(CELL_W * 1.3);
             for row in items.chunks(cols) {
                 ui.horizontal(|ui| {
                     ui.spacing_mut().item_spacing = vec2(0.0, 0.0);
                     for item in row {
                         match item {
-                            Some(i) => self.tile(ui, *i, sys, tile_w),
-                            None => self.account_tile(ui, tile_w),
+                            Some(i) => self.cell(ui, *i, sys, cell_w),
+                            None => self.account_cell(ui, cell_w),
                         }
                     }
                 });
@@ -454,8 +550,209 @@ impl LauncherApp {
         }
     }
 
+    /// Celda del mosaico: fondo al pasar el ratón, icono con su distintivo, nombre y una
+    /// línea de texto. Devuelve la respuesta (clic = abrir la ficha).
+    fn paint_cell(&self, ui: &mut Ui, w: f32, cell: Cell) -> egui::Response {
+        let Cell {
+            icon_id,
+            accent,
+            name,
+            line,
+            badge,
+            dim,
+            progress,
+        } = cell;
+        let (rect, resp) = ui.allocate_exact_size(vec2(w, CELL_H), Sense::click());
+        if !ui.is_rect_visible(rect) {
+            return resp;
+        }
+        let painter = ui.painter_at(rect);
+        let hovered = resp.hovered();
+        let bg = if hovered { SURFACE_HI } else { BG };
+        let card = rect.shrink(4.0);
+        if hovered {
+            painter.rect_filled(card, CornerRadius::same(10), SURFACE_HI);
+        }
+        if resp.has_focus() {
+            painter.rect_stroke(
+                card,
+                CornerRadius::same(10),
+                Stroke::new(1.5, accent),
+                StrokeKind::Inside,
+            );
+        }
+        let icon = Rect::from_center_size(
+            pos2(rect.center().x, rect.top() + 18.0 + CELL_ICON / 2.0),
+            vec2(CELL_ICON, CELL_ICON),
+        );
+        self.icons.paint(&painter, icon, icon_id, accent);
+        if dim {
+            painter.rect_filled(
+                icon.expand(1.0),
+                CornerRadius::same((CELL_ICON * 0.22) as u8),
+                bg.gamma_multiply(0.62),
+            );
+        }
+        if let Some(b) = badge {
+            paint_badge(&painter, icon.right_bottom() - vec2(4.0, 4.0), 11.0, b, bg);
+        }
+        let text_w = w - 16.0;
+        let mut name = name;
+        name.wrap = egui::text::TextWrapping::truncate_at_width(text_w);
+        let name = ui.fonts_mut(|f| f.layout_job(name));
+        let y = icon.bottom() + 12.0;
+        painter.galley(pos2(rect.center().x - name.size().x / 2.0, y), name, TEXT);
+        let y = y + 22.0;
+        match progress {
+            Some(p) => {
+                let bar = Rect::from_center_size(pos2(rect.center().x, y + 7.0), vec2(72.0, 4.0));
+                painter.rect_filled(bar, CornerRadius::same(2), LINE);
+                let mut done = bar;
+                done.set_width(bar.width() * p.clamp(0.0, 1.0));
+                painter.rect_filled(done, CornerRadius::same(2), accent);
+            }
+            None => {
+                let mut job = LayoutJob::simple_singleline(line.0, theme::font(12.0), line.1);
+                job.wrap = egui::text::TextWrapping::truncate_at_width(text_w);
+                let g = ui.fonts_mut(|f| f.layout_job(job));
+                painter.galley(pos2(rect.center().x - g.size().x / 2.0, y), g, line.1);
+            }
+        }
+        resp.on_hover_cursor(egui::CursorIcon::PointingHand)
+    }
+
+    fn cell(&mut self, ui: &mut Ui, i: usize, sys: &SystemInfo, w: f32) {
+        let app: &'static AppDef = &APPS[i];
+        let accent = theme::accent(app.accent);
+        let status = self.status(i);
+        let row = &self.rows[i];
+        let progress = row.busy.as_ref().map(|_| row.progress.unwrap_or(0.0));
+        let line = if row.error.is_some() {
+            ("Error · ver detalles".to_string(), ERROR)
+        } else {
+            match &status {
+                Status::UpdateAvailable => ("Actualización".into(), WARN),
+                Status::NotInstalled => ("Disponible".into(), INFO),
+                Status::Unsupported => ("No disponible".into(), FAINT),
+                Status::Unavailable => ("Sin versión".into(), FAINT),
+                Status::Checking => ("Consultando…".into(), FAINT),
+                Status::UpToDate | Status::InstalledUnknown => (app.tagline.into(), MUTED),
+            }
+        };
+        let badge = match status {
+            _ if progress.is_some() => None,
+            Status::UpToDate | Status::InstalledUnknown => Some(Badge::Ok),
+            Status::UpdateAvailable => Some(Badge::Update),
+            Status::NotInstalled => Some(Badge::Get),
+            Status::Unsupported | Status::Unavailable => Some(Badge::No),
+            Status::Checking => None,
+        };
+        let dim = matches!(status, Status::Unsupported | Status::Unavailable);
+        let cell = Cell {
+            icon_id: app.id,
+            accent,
+            name: two_tone(app.name, 14.5, accent),
+            line,
+            badge,
+            dim,
+            progress,
+        };
+        let resp = self.paint_cell(ui, w, cell);
+        let resp = resp.on_hover_text(format!("{} · {}", app.tagline, status_style(&status).1));
+        if resp.clicked() {
+            self.selected = Some(Selected::App(i));
+        }
+        resp.context_menu(|ui| {
+            ui.set_min_width(190.0);
+            if let Some((label, action)) = self.primary_action(i, sys) {
+                if ui.button(label).clicked() {
+                    self.run_action(i, action);
+                }
+            }
+            if ui.button("Ver detalles").clicked() {
+                self.selected = Some(Selected::App(i));
+            }
+            if ui.button("Novedades de la versión").clicked() {
+                super::open_link(self.notes_url(i));
+            }
+            if self.rows[i].installed.is_some() && self.rows[i].busy.is_none() {
+                ui.separator();
+                if ui
+                    .button(RichText::new("Desinstalar…").color(ERROR))
+                    .clicked()
+                {
+                    self.confirm_uninstall = Some(i);
+                }
+            }
+        });
+    }
+
+    fn account_cell(&mut self, ui: &mut Ui, w: f32) {
+        let (color, text) = self.account_status();
+        let badge = if self.account_connected() {
+            Some(Badge::Ok)
+        } else if self.account.saved.is_some() && self.account.loaded {
+            Some(Badge::Warn)
+        } else {
+            None
+        };
+        let cell = Cell {
+            icon_id: "iurefficient",
+            accent: INFO,
+            name: two_tone("Iurefficient", 14.5, INFO),
+            line: (text.to_string(), color),
+            badge,
+            dim: false,
+            progress: None,
+        };
+        let resp = self.paint_cell(ui, w, cell);
+        let resp = resp.on_hover_text("Tu cuenta, para todas las apps");
+        if resp.clicked() {
+            self.selected = Some(Selected::Account);
+        }
+    }
+
+    /// URL de las novedades de la última versión (o de la lista de versiones).
+    pub(super) fn notes_url(&self, i: usize) -> String {
+        self.rows[i]
+            .release
+            .as_ref()
+            .and_then(|r| r.as_ref().ok())
+            .map(|r| r.html_url.clone())
+            .unwrap_or_else(|| APPS[i].release_url())
+    }
+
+    /// Acción principal de la app según su estado, si hay alguna.
+    pub(super) fn primary_action(
+        &self,
+        i: usize,
+        sys: &SystemInfo,
+    ) -> Option<(&'static str, Action)> {
+        if self.rows[i].busy.is_some() {
+            return None;
+        }
+        let has_release = matches!(self.rows[i].release, Some(Ok(_))) && APPS[i].supports(sys);
+        let installed = self.rows[i].installed.is_some();
+        match self.status(i) {
+            Status::NotInstalled if has_release => Some(("Instalar", Action::Install)),
+            Status::UpdateAvailable if has_release => Some(("Actualizar", Action::Update)),
+            _ if installed && has_release && self.selection_differs(i, sys) => {
+                Some(("Cambiar a la selección", Action::Install))
+            }
+            _ if installed => Some(("Abrir", Action::Open)),
+            _ => None,
+        }
+    }
+
+    pub(super) fn run_action(&mut self, i: usize, action: Action) {
+        match action {
+            Action::Open => self.launch(i),
+            Action::Install | Action::Update => self.start_install(i),
+        }
+    }
+
     /// Estado de la cuenta: (color, etiqueta).
-    fn account_status(&self) -> (Color32, &'static str) {
+    pub(super) fn account_status(&self) -> (Color32, &'static str) {
         let a = &self.account;
         match &a.saved {
             _ if !a.loaded => (MUTED, "Consultando…"),
@@ -467,164 +764,8 @@ impl LauncherApp {
         }
     }
 
-    fn account_connected(&self) -> bool {
+    pub(super) fn account_connected(&self) -> bool {
         self.account.saved.as_ref().is_some_and(|s| s.has_session) && !self.account.expired
-    }
-
-    /// Mosaico de la cuenta de Iurefficient: conectar una vez para todas las apps y abrir
-    /// la instancia en el navegador.
-    fn account_tile(&mut self, ui: &mut Ui, w: f32) {
-        let accent = INFO;
-        let (rect, resp) = ui.allocate_exact_size(vec2(w, TILE_H), Sense::hover());
-        let painter = ui.painter_at(rect.expand(1.0));
-        painter.rect(
-            rect,
-            CornerRadius::ZERO,
-            Color32::from_rgb(15, 21, 34),
-            Stroke::new(1.0, LINE),
-            StrokeKind::Inside,
-        );
-        if resp.hovered() || ui.rect_contains_pointer(rect) {
-            painter.rect_filled(
-                Rect::from_min_size(rect.min, vec2(rect.width(), 2.0)),
-                0.0,
-                accent,
-            );
-        }
-        let strip = Rect::from_min_size(rect.min, vec2(w, 40.0));
-        painter.hline(strip.x_range(), strip.bottom(), Stroke::new(1.0, LINE));
-        let badge = Rect::from_min_size(strip.min + vec2(PAD, 10.0), vec2(30.0, 20.0));
-        painter.rect_filled(badge, 0.0, BRAND);
-        painter.text(
-            badge.center(),
-            Align2::CENTER_CENTER,
-            "00",
-            theme::mono(11.0),
-            Color32::WHITE,
-        );
-
-        let connected = self.account_connected();
-        let saved = self.account.saved.clone();
-        let mut ui = ui.new_child(
-            UiBuilder::new()
-                .max_rect(rect)
-                .layout(Layout::top_down(Align::Min)),
-        );
-        ui.scope_builder(
-            UiBuilder::new()
-                .max_rect(Rect::from_min_max(
-                    pos2(badge.right() + 8.0, strip.top()),
-                    pos2(rect.right() - PAD, strip.bottom()),
-                ))
-                .layout(Layout::right_to_left(Align::Center)),
-            |ui| {
-                let gh = "https://github.com/ellaguno/iurefficient-connect";
-                if ui
-                    .add(egui::Label::new(caps("Conector ↗", 10.5, MUTED)).sense(Sense::click()))
-                    .on_hover_text(gh)
-                    .clicked()
-                {
-                    super::open_link(gh);
-                }
-                if let Some(s) = &saved {
-                    ui.add_space(10.0);
-                    if ui
-                        .add(
-                            egui::Label::new(caps("Instancia ↗", 10.5, MUTED))
-                                .sense(Sense::click()),
-                        )
-                        .on_hover_text(&s.web_url)
-                        .clicked()
-                    {
-                        super::open_link(&s.web_url);
-                    }
-                }
-            },
-        );
-
-        let top = strip.bottom() + 20.0;
-        let icon = Rect::from_min_size(pos2(rect.left() + PAD, top), vec2(60.0, 60.0));
-        self.icons.paint(&painter, icon, "iurefficient", accent);
-        let (tagline, hint) = match (&saved, connected) {
-            (Some(s), true) => (
-                format!(
-                    "Conectada como {}",
-                    self.account.name.clone().unwrap_or_else(|| s.email.clone())
-                ),
-                format!("{} · {}", s.email, s.domain),
-            ),
-            (Some(s), false) => (
-                "Vuelve a iniciar sesión".to_string(),
-                format!("{} · {}", s.email, s.domain),
-            ),
-            (None, _) => (
-                "Tu cuenta, para todas las apps".to_string(),
-                "Inicia sesión una vez desde aquí".to_string(),
-            ),
-        };
-        ui.scope_builder(
-            UiBuilder::new()
-                .max_rect(Rect::from_min_max(
-                    pos2(icon.right() + 14.0, top - 4.0),
-                    pos2(rect.right() - PAD, top + 70.0),
-                ))
-                .layout(Layout::top_down(Align::Min)),
-            |ui| {
-                ui.spacing_mut().item_spacing.y = 2.0;
-                ui.add_space(4.0);
-                self.icons.logo(ui, 22.0);
-                ui.add_space(2.0);
-                ui.add(egui::Label::new(RichText::new(tagline).size(14.5).color(TEXT)).truncate());
-                ui.add(egui::Label::new(RichText::new(hint).size(12.5).color(FAINT)).truncate());
-            },
-        );
-
-        ui.scope_builder(
-            UiBuilder::new()
-                .max_rect(Rect::from_min_max(
-                    pos2(rect.left() + PAD, top + 84.0),
-                    pos2(rect.right() - PAD, rect.bottom() - 56.0),
-                ))
-                .layout(Layout::top_down(Align::Min)),
-            |ui| {
-                ui.spacing_mut().item_spacing.y = 8.0;
-                let (color, text) = self.account_status();
-                chip(ui, text, color);
-                let line = match &saved {
-                    Some(s) if connected => {
-                        let dav = if s.has_webdav {
-                            "Sesión y WebDAV guardadas"
-                        } else {
-                            "Sesión guardada · sin WebDAV"
-                        };
-                        dav.to_string()
-                    }
-                    Some(s) if !s.app.is_empty() => format!("Cuenta configurada por {}", s.app),
-                    _ => "IureDav, IureTranscribe, IureOCR e iureditor".to_string(),
-                };
-                ui.add(egui::Label::new(RichText::new(line).size(13.0).color(MUTED)).truncate());
-                let note = match &self.account.error {
-                    Some(e) => RichText::new(e).size(12.0).color(ERROR),
-                    None => RichText::new("Las apps sin cuenta propia la toman al abrirse")
-                        .size(12.0)
-                        .color(FAINT),
-                };
-                ui.add(egui::Label::new(note).truncate());
-            },
-        );
-
-        let bar = Rect::from_min_max(
-            pos2(rect.left() + PAD, rect.bottom() - 54.0),
-            pos2(rect.right() - PAD, rect.bottom() - 18.0),
-        );
-        ui.scope_builder(
-            UiBuilder::new()
-                .max_rect(bar)
-                .layout(Layout::left_to_right(Align::Center)),
-            |ui| {
-                self.account_actions(ui, bar.width());
-            },
-        );
     }
 
     fn account_actions(&mut self, ui: &mut Ui, width: f32) {
@@ -803,175 +944,8 @@ impl LauncherApp {
         }
     }
 
-    fn tile(&mut self, ui: &mut Ui, i: usize, sys: &SystemInfo, w: f32) {
-        let app: &'static AppDef = &APPS[i];
-        let accent = theme::accent(app.accent);
-        let (rect, resp) = ui.allocate_exact_size(vec2(w, TILE_H), Sense::hover());
-        let painter = ui.painter_at(rect.expand(1.0));
-        let hovered = resp.hovered() || ui.rect_contains_pointer(rect);
-        painter.rect(
-            rect,
-            CornerRadius::ZERO,
-            SURFACE,
-            Stroke::new(1.0, LINE),
-            StrokeKind::Inside,
-        );
-        if hovered {
-            painter.rect_filled(
-                Rect::from_min_size(rect.min, vec2(rect.width(), 2.0)),
-                0.0,
-                accent,
-            );
-        }
-
-        // Franja superior: número y enlaces.
-        let strip = Rect::from_min_size(rect.min, vec2(w, 40.0));
-        painter.hline(strip.x_range(), strip.bottom(), Stroke::new(1.0, LINE));
-        let badge = Rect::from_min_size(strip.min + vec2(PAD, 10.0), vec2(30.0, 20.0));
-        painter.rect_filled(badge, 0.0, accent);
-        painter.text(
-            badge.center(),
-            Align2::CENTER_CENTER,
-            format!("{:02}", i + 1),
-            theme::mono(11.0),
-            BG,
-        );
-
-        let release = self.rows[i]
-            .release
-            .as_ref()
-            .and_then(|r| r.as_ref().ok())
-            .cloned();
-        let installed = self.rows[i].installed.clone();
-        let status = self.status(i);
-
-        let mut ui = ui.new_child(
-            UiBuilder::new()
-                .max_rect(rect.shrink2(vec2(PAD, 0.0)))
-                .layout(Layout::top_down(Align::Min)),
-        );
-        // Enlaces a la derecha de la franja.
-        ui.scope_builder(
-            UiBuilder::new()
-                .max_rect(Rect::from_min_max(
-                    pos2(badge.right() + 8.0, strip.top()),
-                    pos2(rect.right() - PAD, strip.bottom()),
-                ))
-                .layout(Layout::right_to_left(Align::Center)),
-            |ui| {
-                let gh = format!("https://github.com/{}", app.repo);
-                if ui
-                    .add(egui::Label::new(caps("GitHub ↗", 10.5, MUTED)).sense(Sense::click()))
-                    .on_hover_text(&gh)
-                    .clicked()
-                {
-                    super::open_link(gh);
-                }
-                ui.add_space(10.0);
-                let notes_url = release
-                    .as_ref()
-                    .map(|r| r.html_url.clone())
-                    .unwrap_or_else(|| app.release_url());
-                let notes = release
-                    .as_ref()
-                    .and_then(|r| r.body.clone())
-                    .unwrap_or_default();
-                let link = ui
-                    .add(egui::Label::new(caps("Novedades ↗", 10.5, MUTED)).sense(Sense::click()));
-                let link = if notes.trim().is_empty() {
-                    link
-                } else {
-                    link.on_hover_text(notes.chars().take(900).collect::<String>())
-                };
-                if link.clicked() {
-                    super::open_link(notes_url);
-                }
-            },
-        );
-
-        // Icono, nombre y descripción.
-        let top = strip.bottom() + 20.0;
-        let icon = Rect::from_min_size(pos2(rect.left() + PAD, top), vec2(60.0, 60.0));
-        self.icons.paint(&painter, icon, app.id, accent);
-        ui.scope_builder(
-            UiBuilder::new()
-                .max_rect(Rect::from_min_max(
-                    pos2(icon.right() + 14.0, top - 4.0),
-                    pos2(rect.right() - PAD, top + 70.0),
-                ))
-                .layout(Layout::top_down(Align::Min)),
-            |ui| {
-                ui.spacing_mut().item_spacing.y = 2.0;
-                ui.label(two_tone(app.name, 25.0, accent))
-                    .on_hover_text(app.description);
-                ui.add(
-                    egui::Label::new(RichText::new(app.tagline).size(14.5).color(TEXT)).truncate(),
-                );
-                ui.add(
-                    egui::Label::new(RichText::new(app.hint).size(12.5).color(FAINT)).truncate(),
-                );
-            },
-        );
-
-        // Estado y versión.
-        ui.scope_builder(
-            UiBuilder::new()
-                .max_rect(Rect::from_min_max(
-                    pos2(rect.left() + PAD, top + 84.0),
-                    pos2(rect.right() - PAD, rect.bottom() - 56.0),
-                ))
-                .layout(Layout::top_down(Align::Min)),
-            |ui| {
-                ui.spacing_mut().item_spacing.y = 8.0;
-                let (color, text) = status_style(&status);
-                let text = match (&status, &release) {
-                    (Status::UpdateAvailable, Some(r)) => format!("Actualización {}", r.version()),
-                    _ => text.to_string(),
-                };
-                chip(ui, &text, color);
-                let version = match (&installed, &release) {
-                    (Some(inst), _) => {
-                        let mut s = format!(
-                            "Versión {} · {}",
-                            inst.version.as_deref().unwrap_or("?"),
-                            inst.format.label()
-                        );
-                        if let Some(v) = inst.variant.filter(|_| app.gpu_variants) {
-                            s.push_str(&format!(" · {}", v.label()));
-                        }
-                        s
-                    }
-                    (None, Some(r)) => format!("Versión {} · {}", r.version(), nice_date(r.date())),
-                    (None, None) => match &self.rows[i].release {
-                        Some(Err(_)) if status == Status::Unavailable && self.token().is_some() => {
-                            "Todavía no hay versiones en GitHub".into()
-                        }
-                        Some(Err(e)) => e.clone(),
-                        _ => "Consultando GitHub…".into(),
-                    },
-                };
-                ui.add(egui::Label::new(RichText::new(version).size(13.0).color(MUTED)).truncate());
-                self.tile_options(ui, i, sys);
-            },
-        );
-
-        // Acciones.
-        let bar = Rect::from_min_max(
-            pos2(rect.left() + PAD, rect.bottom() - 54.0),
-            pos2(rect.right() - PAD, rect.bottom() - 18.0),
-        );
-        ui.scope_builder(
-            UiBuilder::new()
-                .max_rect(bar)
-                .layout(Layout::left_to_right(Align::Center)),
-            |ui| {
-                self.tile_actions(ui, i, sys, bar.width());
-            },
-        );
-    }
-
     /// Variante (IureTranscribe), formato y avisos, en una línea fija del mosaico.
-    fn tile_options(&mut self, ui: &mut Ui, i: usize, sys: &SystemInfo) {
+    pub(super) fn tile_options(&mut self, ui: &mut Ui, i: usize, sys: &SystemInfo) {
         let app: &'static AppDef = &APPS[i];
         if let Some(e) = self.rows[i].error.clone() {
             ui.add(egui::Label::new(RichText::new(&e).size(12.0).color(ERROR)).truncate())
@@ -1012,7 +986,7 @@ impl LauncherApp {
         );
         let mut new_variant = variant;
         let mut new_format = None;
-        ui.with_layout(Layout::left_to_right(Align::Center), |ui| {
+        ui.horizontal(|ui| {
             if app.gpu_variants {
                 let (recommended, why) = app.recommend_variant(sys);
                 caps_label(ui, "Aceleración", 10.0, FAINT);
@@ -1208,7 +1182,14 @@ impl LauncherApp {
                             ui.vertical(|ui| {
                                 ui.set_min_width(230.0);
                                 ui.spacing_mut().item_spacing.y = 0.0;
-                                self.icons.logo(ui, 14.0);
+                                let logo = self.icons.logo(ui, 14.0).interact(Sense::click());
+                                if logo
+                                    .on_hover_text("Ver detalles")
+                                    .on_hover_cursor(egui::CursorIcon::PointingHand)
+                                    .clicked()
+                                {
+                                    self.selected = Some(Selected::Account);
+                                }
                                 ui.add(
                                     egui::Label::new(
                                         RichText::new("Cuenta para todas las apps")
@@ -1245,7 +1226,17 @@ impl LauncherApp {
                             ui.vertical(|ui| {
                                 ui.set_min_width(230.0);
                                 ui.spacing_mut().item_spacing.y = 0.0;
-                                ui.add(egui::Label::new(two_tone(app.name, 15.0, accent)).extend());
+                                let name = egui::Label::new(two_tone(app.name, 15.0, accent))
+                                    .extend()
+                                    .sense(Sense::click());
+                                if ui
+                                    .add(name)
+                                    .on_hover_text("Ver detalles")
+                                    .on_hover_cursor(egui::CursorIcon::PointingHand)
+                                    .clicked()
+                                {
+                                    self.selected = Some(Selected::App(i));
+                                }
                                 ui.add(
                                     egui::Label::new(
                                         RichText::new(app.tagline).size(12.0).color(FAINT),
@@ -1497,25 +1488,37 @@ impl eframe::App for LauncherApp {
                     .hline(full.x_range(), full.top(), Stroke::new(1.0, LINE));
                 ui.painter()
                     .hline(full.x_range(), full.bottom(), Stroke::new(1.0, LINE));
+                // Cada ficha con su propio desplazamiento: se abre arriba y, al volver, el
+                // mosaico sigue donde estaba.
+                let scroll_id = match self.selected {
+                    None => "list".to_string(),
+                    Some(Selected::Account) => "detail-account".to_string(),
+                    Some(Selected::App(i)) => format!("detail-{i}"),
+                };
                 egui::ScrollArea::vertical()
+                    .id_salt(scroll_id)
                     .auto_shrink([false, false])
                     .show(ui, |ui| {
                         // Hueco para la barra de desplazamiento.
                         ui.set_max_width(ui.available_width() - 14.0);
                         self.update_banner(ui);
-                        self.filter_bar(ui);
                         match self.sys.clone() {
                             None => {
+                                self.filter_bar(ui);
                                 ui.add_space(40.0);
                                 ui.vertical_centered(|ui| {
                                     ui.spinner();
                                     ui.label(RichText::new("Analizando el equipo…").color(MUTED));
                                 });
                             }
-                            Some(sys) => match self.view {
-                                ViewMode::Grid => self.grid(ui, &sys),
-                                ViewMode::Table => self.table(ui, &sys),
-                            },
+                            Some(sys) if self.selected.is_some() => self.detail(ui, &sys),
+                            Some(sys) => {
+                                self.filter_bar(ui);
+                                match self.view {
+                                    ViewMode::Grid => self.grid(ui, &sys),
+                                    ViewMode::Table => self.table(ui, &sys),
+                                }
+                            }
                         }
                         ui.add_space(24.0);
                     });
@@ -1529,8 +1532,23 @@ impl eframe::App for LauncherApp {
         if self.show_log {
             self.log_window(&ctx);
         }
+        // Esc (o el botón «atrás» del ratón) cierra la ficha si no hay un diálogo encima.
+        let modal = self.viewer.is_some()
+            || self.confirm_uninstall.is_some()
+            || self.login.is_some()
+            || self.confirm_logout;
+        if self.selected.is_some()
+            && !modal
+            && ctx.input(|i| {
+                i.key_pressed(egui::Key::Escape)
+                    || i.pointer.button_pressed(egui::PointerButton::Extra1)
+            })
+        {
+            self.selected = None;
+        }
         self.uninstall_modal(&ctx);
         self.login_modal(&ctx);
         self.logout_modal(&ctx);
+        self.shot_viewer(&ctx);
     }
 }

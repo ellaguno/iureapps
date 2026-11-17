@@ -8,6 +8,7 @@ mod github;
 mod gui;
 mod installer;
 mod plan;
+mod shots;
 mod state;
 mod system;
 mod util;
