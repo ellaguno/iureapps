@@ -403,11 +403,70 @@ impl LauncherApp {
                         .color(TEXT),
                     );
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                        if let Some(super::SelfUpdate::Running(p)) = self.self_updating {
+                            ui.spinner();
+                            caps_label(
+                                ui,
+                                &format!("Actualizando… {:.0}%", p * 100.0),
+                                10.5,
+                                MUTED,
+                            );
+                            ui.add(
+                                egui::ProgressBar::new(p)
+                                    .desired_width(160.0)
+                                    .desired_height(6.0)
+                                    .fill(BRAND)
+                                    .corner_radius(0.0),
+                            );
+                            return;
+                        }
                         if flat_button(ui, "×", None, vec2(30.0, 30.0)).clicked() {
                             self.update_dismissed = true;
                         }
-                        if flat_button(ui, "Descargar", Some(TEXT), vec2(110.0, 30.0)).clicked() {
-                            super::open_link(&r.html_url);
+                        let plan = self
+                            .sys
+                            .as_ref()
+                            .map(|sys| crate::selfupdate::plan(&r, sys).map(|_| ()));
+                        let failed =
+                            matches!(self.self_updating, Some(super::SelfUpdate::Failed(_)));
+                        match plan {
+                            Some(Ok(())) if !failed => {
+                                let busy = self.rows.iter().any(|r| r.busy.is_some());
+                                let b = ui
+                                    .add_enabled_ui(!busy, |ui| {
+                                        flat_button(
+                                            ui,
+                                            "Actualizar y reiniciar",
+                                            Some(TEXT),
+                                            vec2(190.0, 30.0),
+                                        )
+                                    })
+                                    .inner
+                                    .on_hover_text(
+                                        "Descarga la versión nueva, comprueba su firma, la instala \
+                                         y vuelve a abrir el lanzador",
+                                    )
+                                    .on_disabled_hover_text(
+                                        "Espera a que terminen las instalaciones en curso",
+                                    );
+                                if b.clicked() {
+                                    self.start_self_update();
+                                }
+                            }
+                            other => {
+                                let why = match other {
+                                    Some(Err(e)) => format!(
+                                        "No puede actualizarse solo: {e}. Descárgalo desde GitHub."
+                                    ),
+                                    _ => "Descárgalo desde GitHub.".to_string(),
+                                };
+                                if flat_button(ui, "Descargar", Some(TEXT), vec2(110.0, 30.0))
+                                    .on_hover_text(why)
+                                    .clicked()
+                                {
+                                    super::open_link(&r.html_url);
+                                }
+                            }
                         }
                         if ui
                             .add(
@@ -420,6 +479,14 @@ impl LauncherApp {
                         }
                     });
                 });
+                if let Some(super::SelfUpdate::Failed(e)) = &self.self_updating {
+                    ui.add_space(6.0);
+                    ui.label(
+                        RichText::new(format!("No se pudo actualizar: {e}"))
+                            .size(12.5)
+                            .color(ERROR),
+                    );
+                }
             });
     }
 

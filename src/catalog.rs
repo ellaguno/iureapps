@@ -46,7 +46,7 @@ pub struct AppDef {
     pub note: &'static str,
 }
 
-const KEY_8F1B: &str = "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDhGMUI0OEUxNjg1NjE1MjUKUldRbEZWWm80VWdiajlpRzB5WFRKY0RFZ01VVGN0TVMrV01LQjZWTUNTa3JsV0VoMFRWQTlmbmUK";
+pub(crate) const KEY_8F1B: &str = "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDhGMUI0OEUxNjg1NjE1MjUKUldRbEZWWm80VWdiajlpRzB5WFRKY0RFZ01VVGN0TVMrV01LQjZWTUNTa3JsV0VoMFRWQTlmbmUK";
 const KEY_E017: &str = "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEUwMTc4NjI1QkY2NjQyQ0IKUldUTFFtYS9KWVlYNEw1ZDQ0VEJNK2pQMGQ2UEJTSWJnZEhyOXZnVUYzWFRURUM5S1RJVmdpbGEK";
 /// Clave de IureDesk (`docs/minisign.pub` de su repo, en base64). No es Tauri: firma con
 /// `cargo xtask sign`, en el mismo formato.

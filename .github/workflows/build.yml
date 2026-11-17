@@ -113,6 +113,22 @@ jobs:
         with:
           path: dist
           merge-multiple: true
+      # Misma clave del actualizador de Tauri que iureditor, IureTranscribe e IureDav: el
+      # lanzador verifica estas firmas antes de actualizarse solo (src/selfupdate.rs).
+      - name: Firmar (minisign, clave del actualizador)
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: |
+          if [[ -z "$TAURI_SIGNING_PRIVATE_KEY" ]]; then
+            echo "::warning::Falta el secret TAURI_SIGNING_PRIVATE_KEY: la release sale sin firmas y el lanzador no podrá actualizarse solo."
+            exit 0
+          fi
+          for f in dist/*; do
+            [[ "$f" == *.sig ]] && continue
+            npx --yes @tauri-apps/cli@2 signer sign "$f"
+          done
+          ls -la dist
       - name: Publicar
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

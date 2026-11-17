@@ -11,12 +11,11 @@ use crate::installer::{self, Installed};
 use crate::plan::{self, Status};
 use crate::state::{version_cmp, Managed, State};
 use crate::system::SystemInfo;
+use crate::{instance, selfupdate};
 use eframe::egui::{self, RichText};
 use std::collections::HashMap;
 use std::sync::mpsc::{channel, Receiver, Sender};
 use std::time::Instant;
-
-const SELF_REPO: &str = "ellaguno/iureapps";
 
 enum Msg {
     System(Box<SystemInfo>),
@@ -31,6 +30,16 @@ enum Msg {
     LoginDone(Result<connect::LoginOutcome, String>),
     LogoutDone(Result<(), String>),
     Shots(usize, Result<Vec<(String, egui::ColorImage)>, String>),
+    /// Otra instancia pidió que esta ventana se muestre.
+    Wake,
+    SelfProgress(f32),
+    SelfDone(Result<selfupdate::Relaunch, String>),
+}
+
+/// Actualización del propio lanzador.
+enum SelfUpdate {
+    Running(f32),
+    Failed(String),
 }
 
 /// Estado de la cuenta de Iurefficient compartida.
@@ -129,9 +138,17 @@ pub struct LauncherApp {
     shots: HashMap<usize, Shots>,
     /// Captura ampliada: (app, índice).
     viewer: Option<(usize, usize)>,
+    self_updating: Option<SelfUpdate>,
 }
 
 pub fn run() -> Result<(), String> {
+    // Ya abierto: se trae al frente esa ventana. Tras actualizarse, la versión nueva no cede
+    // ante la anterior, que se está cerrando.
+    if std::env::var_os(selfupdate::RESTARTED_ENV).is_some() {
+        std::env::remove_var(selfupdate::RESTARTED_ENV);
+    } else if instance::wake_existing() {
+        return Ok(());
+    }
     let mut viewport = egui::ViewportBuilder::default();
     if let Some(icon) = theme::window_icon() {
         viewport = viewport.with_icon(icon);
@@ -216,7 +233,10 @@ impl LauncherApp {
             selected: None,
             shots: HashMap::new(),
             viewer: None,
+            self_updating: None,
         };
+        let (tx, ctx2) = (app.tx.clone(), app.ctx.clone());
+        instance::listen(move || Self::send(&tx, &ctx2, Msg::Wake));
         app.spawn_system();
         app.load_account();
         app.refresh_releases();
@@ -267,7 +287,7 @@ impl LauncherApp {
         }
         let (tx, ctx) = (self.tx.clone(), self.ctx.clone());
         std::thread::spawn(move || {
-            if let Ok(r) = github::latest_release(SELF_REPO, None) {
+            if let Ok(r) = github::latest_release(selfupdate::REPO, None) {
                 Self::send(&tx, &ctx, Msg::SelfRelease(r));
             }
         });
@@ -325,6 +345,17 @@ impl LauncherApp {
                     }
                 }
                 Msg::LoginDone(r) => self.login_done(r),
+                Msg::Wake => {
+                    use egui::ViewportCommand as V;
+                    self.ctx.send_viewport_cmd(V::Visible(true));
+                    self.ctx.send_viewport_cmd(V::Minimized(false));
+                    self.ctx.send_viewport_cmd(V::Focus);
+                    self.ctx.send_viewport_cmd(V::RequestUserAttention(
+                        egui::UserAttentionType::Informational,
+                    ));
+                }
+                Msg::SelfProgress(p) => self.self_updating = Some(SelfUpdate::Running(p)),
+                Msg::SelfDone(r) => self.self_update_done(r),
                 Msg::Shots(i, r) => {
                     let shots = match r {
                         Ok(images) => Shots::Ready(
@@ -464,6 +495,60 @@ impl LauncherApp {
             match installer::launch(inst, sys) {
                 Ok(()) => self.log.push(format!("Abriendo {}", APPS[i].name)),
                 Err(e) => self.rows[i].error = Some(e),
+            }
+        }
+    }
+
+    fn start_self_update(&mut self) {
+        let (Some(sys), Some(release)) = (&self.sys, &self.self_update) else {
+            return;
+        };
+        let plan = match selfupdate::plan(release, sys) {
+            Ok(p) => p,
+            Err(e) => {
+                self.self_updating = Some(SelfUpdate::Failed(e));
+                return;
+            }
+        };
+        self.log.push(format!(
+            "Iurefficient Apps: actualizando a {}",
+            release.version()
+        ));
+        self.self_updating = Some(SelfUpdate::Running(0.0));
+        let (tx, ctx, token) = (self.tx.clone(), self.ctx.clone(), self.token());
+        std::thread::spawn(move || {
+            let (tx2, ctx2) = (tx.clone(), ctx.clone());
+            let log = move |m: String| {
+                Self::send(&tx2, &ctx2, Msg::Log(format!("Iurefficient Apps: {m}")))
+            };
+            let (tx3, ctx3) = (tx.clone(), ctx.clone());
+            let last = std::cell::Cell::new(0.0f32);
+            let progress = move |p: f32| {
+                if p - last.get() >= 0.01 || p >= 1.0 {
+                    last.set(p);
+                    Self::send(&tx3, &ctx3, Msg::SelfProgress(p));
+                }
+            };
+            let r = selfupdate::apply(&plan, token.as_deref(), &log, &progress);
+            Self::send(&tx, &ctx, Msg::SelfDone(r));
+        });
+    }
+
+    /// Instalada la versión nueva: se abre y esta ventana se cierra.
+    fn self_update_done(&mut self, r: Result<selfupdate::Relaunch, String>) {
+        let r = r.and_then(|target| {
+            instance::release();
+            selfupdate::relaunch(&target)
+        });
+        match r {
+            Ok(()) => {
+                self.log
+                    .push("Iurefficient Apps: versión nueva instalada; reiniciando".into());
+                self.ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+            }
+            Err(e) => {
+                self.log.push(format!("Iurefficient Apps: {e}"));
+                self.self_updating = Some(SelfUpdate::Failed(e));
             }
         }
     }
