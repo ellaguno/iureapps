@@ -4,9 +4,15 @@ Lanzador e instalador ligero, en Rust, de las apps de escritorio de
 [Iurefficient](https://iurefficient.com): **iureditor, IureTranscribe, IureOCR, IureDav,
 IureVoz, IureDesk e IureProject**. Un solo ejecutable (~7 MB) para Linux, Windows y macOS.
 
-La ventana muestra las apps en **mosaico** (o en tabla): icono, nombre con el color de cada
-app, estado, versión, aceleración elegida y la acción principal (instalar, actualizar o
-abrir), con filtros (todas, instaladas, actualizaciones, no instaladas) y búsqueda.
+La ventana muestra las apps en **mosaico** (o en tabla), como el cajón de apps de GNOME:
+icono, nombre y un distintivo de estado en la esquina del icono (✓ instalada, ↑ actualización,
+↓ disponible, ⊘ no disponible, con el icono atenuado), con filtros (todas, instaladas,
+actualizaciones, no instaladas) y búsqueda. Un clic abre la **ficha** de la app: portada con su
+color, la acción principal (Abrir en verde, Instalar en azul, Actualizar en ámbar),
+Desinstalar, aceleración y formato, capturas de pantalla (un clic las amplía), versión
+instalada y última, tamaño del instalador y novedades. Esc o «‹ Todas las apps» vuelve al
+mosaico; el clic derecho en un icono ofrece la acción principal y Desinstalar sin abrir la
+ficha.
 
 Qué hace:
 
@@ -28,6 +34,12 @@ Qué hace:
   equipo si no hay ninguna y deja la cuenta como «cuenta activa». IureDav, IureTranscribe,
   IureOCR e iureditor la toman al abrirse si no tienen otra configurada. «Abrir
   Iurefficient» abre la instancia en el navegador.
+- **Se actualiza solo**: cuando hay una versión nueva del lanzador, «Actualizar y reiniciar»
+  baja el archivo que corresponde a cómo está instalado (`.deb`/`.rpm` con `pkexec`, el
+  ejecutable suelto, el `.exe` de Windows o el `.dmg` de macOS), comprueba su firma, se
+  reemplaza y vuelve a abrirse. Si la release no está firmada o no hay versión para el equipo,
+  ofrece descargarla a mano. También `iureapps actualizar-lanzador`.
+- **Una sola ventana**: si ya está abierto, volver a abrirlo trae al frente la ventana existente.
 - **Verifica la firma minisign** (`.sig`) de cada instalador con la clave pública del
   actualizador de cada app antes de instalarlo; las apps que no firman (IureDesk) se
   comprueban contra el `SHA256SUMS` de su release.
@@ -58,6 +70,7 @@ iureapps conectar 2.ds.iurefficient.com yo@despacho.com   # pide contraseña (y 
 iureapps cuenta               # estado de la cuenta compartida
 iureapps iurefficient         # abre la instancia en el navegador
 iureapps desconectar
+iureapps actualizar-lanzador # instala la última versión de iureapps
 ```
 
 IureDesk publica sus instaladores (firmados con minisign) en su propio repo,
@@ -65,6 +78,33 @@ IureDesk publica sus instaladores (firmados con minisign) en su propio repo,
 `ellaguno/iureproject-releases`. Para repos privados, configura un token de GitHub de
 sólo lectura en *Ajustes* o con la variable `IUREAPPS_GITHUB_TOKEN`. El token también sube
 el límite de la API de 60 a 5000 consultas por hora.
+
+## Firma de las releases
+
+Cada archivo de la release lleva su `.sig`, firmado con la misma clave del actualizador de Tauri
+que iureditor, IureTranscribe e IureDav (clave pública `8F1B48E168561525`). Los workflows la
+toman de los secrets `TAURI_SIGNING_PRIVATE_KEY` y `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`
+(los mismos valores que en esos repos). Sin ellos la release se publica igual, sin `.sig`, y el
+lanzador no se actualiza solo: ofrece la descarga.
+
+## Capturas de cada app
+
+La ficha muestra las capturas que cada app anuncia en un `iureapps.json` en la raíz de su repo
+(rama por defecto). Es opcional: sin él, la ficha dice que la app todavía no publica capturas.
+
+```json
+{
+  "screenshots": [
+    { "url": "screenshots/editor.png", "caption": "Edición con vista previa" },
+    { "url": "screenshots/exportar.png", "caption": "Exportar a Word y PDF" }
+  ]
+}
+```
+
+`url` es una ruta dentro del repo o una URL `https://` completa. Sólo PNG, hasta 6 capturas de
+8 MB y 4096 px por lado como mucho. Se descargan de `raw.githubusercontent.com` (con el token de
+GitHub si hay, para repos privados) al abrir la ficha, una vez por sesión o al pulsar
+*Comprobar*, y se guardan en `<datos>/shots/<app>/` para verlas sin conexión.
 
 ## Recursos
 

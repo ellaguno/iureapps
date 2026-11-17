@@ -3,7 +3,7 @@
 use crate::catalog::{self, Format, Variant, APPS};
 use crate::state::State;
 use crate::system::SystemInfo;
-use crate::{connect, github, installer, plan};
+use crate::{connect, github, installer, plan, selfupdate};
 
 const HELP: &str = "iureapps — lanzador de las apps de Iurefficient
 
@@ -19,6 +19,7 @@ Uso:
   iureapps conectar <instancia> <correo>   inicia sesión (pide la contraseña)
   iureapps desconectar             cierra la sesión en este equipo
   iureapps iurefficient            abre la instancia en el navegador
+  iureapps actualizar-lanzador     instala la última versión de iureapps (verifica la firma)
 
 Token para repos privados: variable IUREAPPS_GITHUB_TOKEN (o GITHUB_TOKEN).";
 
@@ -46,6 +47,7 @@ pub fn run(args: &[String]) -> i32 {
         "conectar" | "login" => login(&args[1..]),
         "desconectar" | "logout" => logout(),
         "iurefficient" | "web" => open_web(),
+        "actualizar-lanzador" | "self-update" => self_update(),
         other => Err(format!("orden desconocida: {other}\n\n{HELP}")),
     };
     match result {
@@ -114,6 +116,27 @@ fn flag<'a>(args: &'a [String], name: &str) -> Option<&'a str> {
         .position(|a| a == name)
         .and_then(|i| args.get(i + 1))
         .map(String::as_str)
+}
+
+fn self_update() -> Result<(), String> {
+    let sys = SystemInfo::detect();
+    let state = State::load();
+    let token = github::token(state.github_token.as_deref());
+    let release = github::latest_release(selfupdate::REPO, token.as_deref())?;
+    let current = env!("CARGO_PKG_VERSION");
+    if crate::state::version_cmp(release.version(), current).is_le() {
+        println!("iureapps {current} ya es la última versión.");
+        return Ok(());
+    }
+    let plan = selfupdate::plan(&release, &sys)?;
+    println!("Actualizando iureapps {current} → {}…", release.version());
+    let log = |m: String| println!("  {m}");
+    selfupdate::apply(&plan, token.as_deref(), &log, &|_| {})?;
+    println!(
+        "Listo. La próxima vez que abras iureapps será la versión {}.",
+        release.version()
+    );
+    Ok(())
 }
 
 fn list() -> Result<(), String> {
