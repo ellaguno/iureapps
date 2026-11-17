@@ -188,10 +188,26 @@ jobs:
           shasum -a 256 "$dmg"
           echo "path=$dmg" >> "$GITHUB_OUTPUT"
 
+      # La misma clave del actualizador que firma las demás descargas (build.yml): con ella el
+      # lanzador comprueba el .dmg antes de reemplazarse.
+      - name: Firmar el .dmg (minisign, clave del actualizador)
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: |
+          if [[ -z "$TAURI_SIGNING_PRIVATE_KEY" ]]; then
+            echo "::warning::Falta el secret TAURI_SIGNING_PRIVATE_KEY: el .dmg sale sin firma y el lanzador no podrá actualizarse solo."
+            exit 0
+          fi
+          npx --yes @tauri-apps/cli@2 signer sign "${{ steps.dmg.outputs.path }}"
+          ls -la dist
+
       - uses: actions/upload-artifact@v4
         with:
           name: iureapps-macos-dmg
-          path: dist/*.dmg
+          path: |
+            dist/*.dmg
+            dist/*.dmg.sig
 
       - name: Publicar en la release
         if: startsWith(github.ref, 'refs/tags/v') || inputs.release != ''
@@ -206,7 +222,9 @@ jobs:
               --title "Iurefficient Apps ${TAG#v}" --generate-notes && break
             sleep $((i * 10))
           done
-          gh release upload "$TAG" "${{ steps.dmg.outputs.path }}" --repo "$GITHUB_REPOSITORY" --clobber
+          files=("${{ steps.dmg.outputs.path }}")
+          [[ -f "${files[0]}.sig" ]] && files+=("${files[0]}.sig")
+          gh release upload "$TAG" "${files[@]}" --repo "$GITHUB_REPOSITORY" --clobber
 
       - name: Limpiar llavero y llave
         if: always()

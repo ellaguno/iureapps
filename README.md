@@ -34,6 +34,12 @@ Qué hace:
   equipo si no hay ninguna y deja la cuenta como «cuenta activa». IureDav, IureTranscribe,
   IureOCR e iureditor la toman al abrirse si no tienen otra configurada. «Abrir
   Iurefficient» abre la instancia en el navegador.
+- **Se actualiza solo**: cuando hay una versión nueva del lanzador, «Actualizar y reiniciar»
+  baja el archivo que corresponde a cómo está instalado (`.deb`/`.rpm` con `pkexec`, el
+  ejecutable suelto, el `.exe` de Windows o el `.dmg` de macOS), comprueba su firma, se
+  reemplaza y vuelve a abrirse. Si la release no está firmada o no hay versión para el equipo,
+  ofrece descargarla a mano. También `iureapps actualizar-lanzador`.
+- **Una sola ventana**: si ya está abierto, volver a abrirlo trae al frente la ventana existente.
 - **Verifica la firma minisign** (`.sig`) de cada instalador con la clave pública del
   actualizador de cada app antes de instalarlo; las apps que no firman (IureDesk) se
   comprueban contra el `SHA256SUMS` de su release.
@@ -64,6 +70,7 @@ iureapps conectar 2.ds.iurefficient.com yo@despacho.com   # pide contraseña (y 
 iureapps cuenta               # estado de la cuenta compartida
 iureapps iurefficient         # abre la instancia en el navegador
 iureapps desconectar
+iureapps actualizar-lanzador # instala la última versión de iureapps
 ```
 
 IureDesk publica sus instaladores (firmados con minisign) en su propio repo,
@@ -71,6 +78,14 @@ IureDesk publica sus instaladores (firmados con minisign) en su propio repo,
 `ellaguno/iureproject-releases`. Para repos privados, configura un token de GitHub de
 sólo lectura en *Ajustes* o con la variable `IUREAPPS_GITHUB_TOKEN`. El token también sube
 el límite de la API de 60 a 5000 consultas por hora.
+
+## Firma de las releases
+
+Cada archivo de la release lleva su `.sig`, firmado con la misma clave del actualizador de Tauri
+que iureditor, IureTranscribe e IureDav (clave pública `8F1B48E168561525`). Los workflows la
+toman de los secrets `TAURI_SIGNING_PRIVATE_KEY` y `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`
+(los mismos valores que en esos repos). Sin ellos la release se publica igual, sin `.sig`, y el
+lanzador no se actualiza solo: ofrece la descarga.
 
 ## Capturas de cada app
 
