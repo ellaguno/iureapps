@@ -197,12 +197,23 @@ pub fn fetch_text(asset: &Asset, token: Option<&str>) -> Result<String, String> 
 /// Descarga un archivo pequeño a memoria (como mucho `limit` bytes). Con token y si es
 /// `raw.githubusercontent.com`, lo manda para leer repos privados; a otros hosts, nunca.
 /// `Ok(None)` si no existe (404).
+///
+/// Un token caducado o revocado hace que GitHub responda 404 (o 401/403) incluso en repos
+/// públicos: en ese caso se reintenta una vez sin token.
 pub fn fetch_bytes(url: &str, token: Option<&str>, limit: u64) -> Result<Option<Vec<u8>>, String> {
-    let mut req = agent().get(url);
-    if let Some(t) = token.filter(|_| url.starts_with("https://raw.githubusercontent.com/")) {
-        req = req.header("Authorization", &format!("Bearer {t}"));
-    }
-    match req.call() {
+    let token = token.filter(|_| url.starts_with("https://raw.githubusercontent.com/"));
+    let get = |token: Option<&str>| {
+        let mut req = agent().get(url);
+        if let Some(t) = token {
+            req = req.header("Authorization", &format!("Bearer {t}"));
+        }
+        req.call()
+    };
+    let resp = match get(token) {
+        Err(ureq::Error::StatusCode(401 | 403 | 404)) if token.is_some() => get(None),
+        r => r,
+    };
+    match resp {
         Ok(mut resp) => resp
             .body_mut()
             .with_config()
