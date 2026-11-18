@@ -1,6 +1,7 @@
 //! Interfaz gráfica (egui): mosaico de apps con su icono, estado y acciones.
 
 mod detail;
+mod markdown;
 mod theme;
 mod view;
 
