@@ -222,13 +222,9 @@ impl LauncherApp {
                     .stroke(Stroke::new(1.0, LINE))
                     .inner_margin(14)
                     .show(ui, |ui| {
+                        // Completas: la ficha ya tiene su propio desplazamiento.
                         ui.set_width(ui.available_width());
-                        egui::ScrollArea::vertical()
-                            .id_salt(("notes", i))
-                            .max_height(240.0)
-                            .show(ui, |ui| {
-                                ui.label(RichText::new(notes).size(13.0).color(MUTED));
-                            });
+                        super::markdown::show(ui, notes);
                     });
             }
         }
@@ -406,7 +402,12 @@ impl LauncherApp {
                     RichText::new("Esta app todavía no publica capturas.")
                         .size(13.0)
                         .color(FAINT),
-                );
+                )
+                .on_hover_text(format!(
+                    "Se toman de {}/1.png, 2.png… en github.com/{}",
+                    crate::shots::DIR,
+                    APPS[i].repo
+                ));
             }
             Some(Shots::Failed(e)) => {
                 ui.label(

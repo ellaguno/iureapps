@@ -89,22 +89,32 @@ lanzador no se actualiza solo: ofrece la descarga.
 
 ## Capturas de cada app
 
-La ficha muestra las capturas que cada app anuncia en un `iureapps.json` en la raíz de su repo
-(rama por defecto). Es opcional: sin él, la ficha dice que la app todavía no publica capturas.
+La ficha muestra las capturas que cada app guarda en una carpeta fija de su repo (el de sus
+releases), en la rama por defecto:
 
-```json
-{
-  "screenshots": [
-    { "url": "screenshots/editor.png", "caption": "Edición con vista previa" },
-    { "url": "screenshots/exportar.png", "caption": "Exportar a Word y PDF" }
-  ]
-}
+```text
+docs/screenshots/1.png
+docs/screenshots/2.png         … hasta 6, numeradas en orden y sin saltos
+docs/screenshots/captions.txt  opcional: un pie de foto por línea, en el mismo orden
 ```
 
-`url` es una ruta dentro del repo o una URL `https://` completa. Sólo PNG, hasta 6 capturas de
-8 MB y 4096 px por lado como mucho. Se descargan de `raw.githubusercontent.com` (con el token de
-GitHub si hay, para repos privados) al abrir la ficha, una vez por sesión o al pulsar
-*Comprobar*, y se guardan en `<datos>/shots/<app>/` para verlas sin conexión.
+Basta con subir las imágenes ahí; no hace falta tocar el lanzador. Sólo PNG, de 8 MB y 4096 px
+por lado como mucho. Se leen de `raw.githubusercontent.com` (sin gastar consultas de la API)
+al abrir la ficha, una vez por sesión o al pulsar *Comprobar*, y se guardan en
+`<datos>/shots/<app>/` para verlas sin conexión.
+
+| App | Carpeta |
+| --- | --- |
+| iureditor | `ellaguno/iureditor` → `docs/screenshots/` |
+| IureTranscribe | `ellaguno/iuretranscribe` → `docs/screenshots/` |
+| IureOCR | `ellaguno/iureocr` → `docs/screenshots/` |
+| IureDav | `ellaguno/iuredav` → `docs/screenshots/` |
+| IureVoz | `ellaguno/iurevoz` → `docs/screenshots/` |
+| IureDesk | `ellaguno/iuredesk` → `docs/screenshots/` |
+| IureProject | `ellaguno/iureproject-releases` → `docs/screenshots/` |
+
+Las novedades de cada versión (el texto de la release en GitHub) se muestran con su formato
+Markdown: títulos, listas, negrita, código, citas y enlaces.
 
 ## Recursos
 
