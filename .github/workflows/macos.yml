@@ -36,7 +36,10 @@ env:
 
 jobs:
   macos:
-    runs-on: macos-latest
+    # En la máquina Intel, como build.yml: las arm64 de macos-latest a menudo no consiguen máquina
+    # y GitHub cancela el job en cola (pasó con las releases 0.1.13 y 0.1.14). Desde Intel se
+    # compilan igual las dos arquitecturas y se unen con lipo.
+    runs-on: macos-15-intel
     timeout-minutes: 160
     steps:
       - uses: actions/checkout@v4
