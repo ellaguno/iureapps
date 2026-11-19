@@ -1,9 +1,7 @@
 //! Ficha de una app (o de la cuenta de Iurefficient), en lugar del mosaico: portada con el
 //! color de la app, acciones, variante y formato, capturas, datos técnicos y novedades.
 
-use super::theme::{
-    self, BG, BRAND_NAVY, ERROR, FAINT, INFO, LINE, MUTED, OK, SURFACE, TEXT, WARN,
-};
+use super::theme::{self, pal};
 use super::view::{caps, caps_label, nice_date, press_button, status_style, two_tone, Action};
 use super::{LauncherApp, Selected, Shots};
 use crate::catalog::{AppDef, APPS};
@@ -33,11 +31,19 @@ enum Kind {
 
 fn button(ui: &mut Ui, text: &str, kind: Kind) -> egui::Response {
     let (fill, fg, stroke) = match kind {
-        Kind::Open => (OK, BG, Stroke::NONE),
-        Kind::Install => (INFO, BG, Stroke::NONE),
-        Kind::Update => (WARN, BG, Stroke::NONE),
-        Kind::Danger => (Color32::TRANSPARENT, ERROR, Stroke::new(1.0, ERROR)),
-        Kind::Plain => (Color32::TRANSPARENT, TEXT, Stroke::new(1.0, LINE)),
+        Kind::Open => (pal().ok, pal().bg, Stroke::NONE),
+        Kind::Install => (pal().info, pal().bg, Stroke::NONE),
+        Kind::Update => (pal().warn, pal().bg, Stroke::NONE),
+        Kind::Danger => (
+            Color32::TRANSPARENT,
+            pal().error,
+            Stroke::new(1.0, pal().error),
+        ),
+        Kind::Plain => (
+            Color32::TRANSPARENT,
+            pal().text,
+            Stroke::new(1.0, pal().line),
+        ),
     };
     let min_w = if matches!(kind, Kind::Open | Kind::Install | Kind::Update) {
         140.0
@@ -56,7 +62,7 @@ fn button(ui: &mut Ui, text: &str, kind: Kind) -> egui::Response {
 
 fn link(ui: &mut Ui, text: &str, url: &str) {
     if ui
-        .add(egui::Label::new(caps(text, 10.5, MUTED)).sense(Sense::click()))
+        .add(egui::Label::new(caps(text, 10.5, pal().muted)).sense(Sense::click()))
         .on_hover_text(url)
         .on_hover_cursor(egui::CursorIcon::PointingHand)
         .clicked()
@@ -85,7 +91,7 @@ fn fact(ui: &mut Ui, label: &str, value: &str, color: Color32) {
         |ui| {
             ui.set_width(190.0);
             ui.spacing_mut().item_spacing.y = 3.0;
-            caps_label(ui, label, 10.0, FAINT);
+            caps_label(ui, label, 10.0, pal().faint);
             ui.add(egui::Label::new(RichText::new(value).size(13.5).color(color)).truncate())
                 .on_hover_text(value);
         },
@@ -94,7 +100,7 @@ fn fact(ui: &mut Ui, label: &str, value: &str, color: Color32) {
 
 fn section(ui: &mut Ui, title: &str) {
     ui.add_space(26.0);
-    caps_label(ui, title, 11.0, MUTED);
+    caps_label(ui, title, 11.0, pal().muted);
     ui.add_space(10.0);
 }
 
@@ -104,7 +110,10 @@ impl LauncherApp {
         let Some(sel) = self.selected else { return };
         ui.add_space(16.0);
         if ui
-            .add(egui::Label::new(caps("‹  Todas las apps", 11.0, MUTED)).sense(Sense::click()))
+            .add(
+                egui::Label::new(caps("‹  Todas las apps", 11.0, pal().muted))
+                    .sense(Sense::click()),
+            )
             .on_hover_text("Esc")
             .on_hover_cursor(egui::CursorIcon::PointingHand)
             .clicked()
@@ -129,8 +138,8 @@ impl LauncherApp {
         gradient(
             &painter,
             rect,
-            accent.lerp_to_gamma(BRAND_NAVY, 0.3),
-            BRAND_NAVY.lerp_to_gamma(BG, 0.45),
+            accent.lerp_to_gamma(pal().brand_navy, 0.3),
+            pal().brand_navy.lerp_to_gamma(pal().bg, 0.45),
         );
         // El icono en grande y tenue, como marca de agua.
         if let Some(t) = self.icons.texture(icon_id) {
@@ -149,7 +158,7 @@ impl LauncherApp {
         p.rect_filled(
             icon.expand(5.0),
             CornerRadius::same(((HERO_ICON + 10.0) * 0.22) as u8),
-            BG,
+            pal().bg,
         );
         self.icons.paint(p, icon, icon_id, accent);
 
@@ -182,7 +191,7 @@ impl LauncherApp {
                 egui::Label::new(
                     RichText::new(format!("{} · {}", app.tagline, app.hint))
                         .size(14.0)
-                        .color(MUTED),
+                        .color(pal().muted),
                 )
                 .truncate(),
             );
@@ -200,7 +209,7 @@ impl LauncherApp {
                     app.name,
                     sys.platform_label()
                 ))
-                .color(WARN),
+                .color(pal().warn),
             );
         }
 
@@ -211,15 +220,15 @@ impl LauncherApp {
         self.app_facts(ui, i, sys);
 
         section(ui, "Acerca de");
-        ui.label(RichText::new(app.description).size(15.0).color(TEXT));
+        ui.label(RichText::new(app.description).size(15.0).color(pal().text));
         let release = self.rows[i].release.as_ref().and_then(|r| r.as_ref().ok());
         if let Some(r) = release {
             let notes = r.body.as_deref().unwrap_or("").trim();
             if !notes.is_empty() {
                 section(ui, &format!("Novedades de la versión {}", r.version()));
                 egui::Frame::new()
-                    .fill(SURFACE)
-                    .stroke(Stroke::new(1.0, LINE))
+                    .fill(pal().surface)
+                    .stroke(Stroke::new(1.0, pal().line))
                     .inner_margin(14)
                     .show(ui, |ui| {
                         // Completas: la ficha ya tiene su propio desplazamiento.
@@ -244,7 +253,7 @@ impl LauncherApp {
                         .corner_radius(0.0),
                 );
                 ui.spinner();
-                caps_label(ui, &format!("{text} {:.0}%", p * 100.0), 10.5, MUTED);
+                caps_label(ui, &format!("{text} {:.0}%", p * 100.0), 10.5, pal().muted);
                 return;
             }
             let installed = self.rows[i].installed.is_some();
@@ -292,7 +301,7 @@ impl LauncherApp {
         });
         if let Some(e) = &self.rows[i].error {
             ui.add_space(6.0);
-            ui.label(RichText::new(e).size(13.0).color(ERROR));
+            ui.label(RichText::new(e).size(13.0).color(pal().error));
         }
     }
 
@@ -319,13 +328,13 @@ impl LauncherApp {
                 }
                 None => "—".into(),
             };
-            fact(ui, "Instalada", &installed, TEXT);
+            fact(ui, "Instalada", &installed, pal().text);
             let latest = match &row.release {
                 Some(Ok(r)) => format!("{} · {}", r.version(), nice_date(r.date())),
                 Some(Err(e)) => e.clone(),
                 None => "Consultando…".into(),
             };
-            fact(ui, "Última versión", &latest, TEXT);
+            fact(ui, "Última versión", &latest, pal().text);
             if let Some(r) = release.filter(|_| app.supports(sys)) {
                 let pref = self.state.prefs.get(app.id);
                 let v = plan::variant(app, sys, row.installed.as_ref(), pref);
@@ -336,14 +345,19 @@ impl LauncherApp {
                         .filter(|s| *s > 0)
                         .map(|s| format!(" · {}", crate::util::human_size(s)))
                         .unwrap_or_default();
-                    fact(ui, "Instalador", &format!("{}{size}", f.label()), TEXT);
+                    fact(
+                        ui,
+                        "Instalador",
+                        &format!("{}{size}", f.label()),
+                        pal().text,
+                    );
                 }
                 if app.gpu_variants {
                     let (rec, _) = app.recommend_variant(sys);
-                    fact(ui, "Aceleración recomendada", rec.label(), TEXT);
+                    fact(ui, "Aceleración recomendada", rec.label(), pal().text);
                 }
             }
-            fact(ui, "Repositorio", app.repo, MUTED);
+            fact(ui, "Repositorio", app.repo, pal().muted);
         });
     }
 
@@ -373,7 +387,7 @@ impl LauncherApp {
                                                 .sense(Sense::click()),
                                         )
                                         .on_hover_cursor(egui::CursorIcon::ZoomIn);
-                                    let line = if r.hovered() { MUTED } else { LINE };
+                                    let line = if r.hovered() { pal().muted } else { pal().line };
                                     ui.painter().rect_stroke(
                                         r.rect,
                                         CornerRadius::same(4),
@@ -386,7 +400,9 @@ impl LauncherApp {
                                     if !caption.is_empty() {
                                         ui.add(
                                             egui::Label::new(
-                                                RichText::new(caption).size(12.0).color(FAINT),
+                                                RichText::new(caption)
+                                                    .size(12.0)
+                                                    .color(pal().faint),
                                             )
                                             .truncate(),
                                         );
@@ -401,7 +417,7 @@ impl LauncherApp {
                 ui.label(
                     RichText::new("Esta app todavía no publica capturas.")
                         .size(13.0)
-                        .color(FAINT),
+                        .color(pal().faint),
                 )
                 .on_hover_text(format!(
                     "Se toman de {}/1.png, 2.png… en github.com/{}",
@@ -413,13 +429,17 @@ impl LauncherApp {
                 ui.label(
                     RichText::new(format!("No se pudieron cargar las capturas: {e}"))
                         .size(13.0)
-                        .color(FAINT),
+                        .color(pal().faint),
                 );
             }
             Some(Shots::Loading) | None => {
                 ui.horizontal(|ui| {
                     ui.spinner();
-                    ui.label(RichText::new("Cargando capturas…").size(13.0).color(FAINT));
+                    ui.label(
+                        RichText::new("Cargando capturas…")
+                            .size(13.0)
+                            .color(pal().faint),
+                    );
                 });
             }
         }
@@ -457,7 +477,7 @@ impl LauncherApp {
                 } else {
                     format!("{caption} · {} de {n}", k + 1)
                 };
-                ui.label(RichText::new(label).color(MUTED));
+                ui.label(RichText::new(label).color(pal().muted));
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     if button(ui, "Cerrar", Kind::Plain).clicked() {
                         close = true;
@@ -501,11 +521,13 @@ impl LauncherApp {
             (Some(_), false) => "Vuelve a iniciar sesión".to_string(),
             (None, _) => "Tu cuenta, para todas las apps".to_string(),
         };
-        self.hero(ui, "iurefficient", INFO, |ui| {
+        self.hero(ui, "iurefficient", pal().info, |ui| {
             ui.add_space(4.0);
             self.icons.logo(ui, 28.0);
             ui.add_space(2.0);
-            ui.add(egui::Label::new(RichText::new(tagline).size(14.0).color(MUTED)).truncate());
+            ui.add(
+                egui::Label::new(RichText::new(tagline).size(14.0).color(pal().muted)).truncate(),
+            );
         });
 
         let busy = !self.account.loaded || self.account.busy || self.account.checking;
@@ -556,7 +578,7 @@ impl LauncherApp {
         });
         if let Some(e) = &self.account.error {
             ui.add_space(6.0);
-            ui.label(RichText::new(e).size(13.0).color(ERROR));
+            ui.label(RichText::new(e).size(13.0).color(pal().error));
         }
 
         section(ui, "Detalles");
@@ -565,18 +587,18 @@ impl LauncherApp {
             fact(ui, "Estado", status, color);
             if let Some(s) = &saved {
                 if let Some(name) = &self.account.name {
-                    fact(ui, "Usuario", name, TEXT);
+                    fact(ui, "Usuario", name, pal().text);
                 }
-                fact(ui, "Correo", &s.email, TEXT);
-                fact(ui, "Instancia", &s.domain, TEXT);
+                fact(ui, "Correo", &s.email, pal().text);
+                fact(ui, "Instancia", &s.domain, pal().text);
                 let dav = if s.has_webdav {
                     "Contraseña de aplicación guardada"
                 } else {
                     "Sin contraseña de aplicación"
                 };
-                fact(ui, "WebDAV", dav, TEXT);
+                fact(ui, "WebDAV", dav, pal().text);
                 if !s.app.is_empty() {
-                    fact(ui, "Configurada por", &s.app, TEXT);
+                    fact(ui, "Configurada por", &s.app, pal().text);
                 }
             }
         });
@@ -590,7 +612,7 @@ impl LauncherApp {
                  WebDAV de este equipo.",
             )
             .size(15.0)
-            .color(TEXT),
+            .color(pal().text),
         );
     }
 }

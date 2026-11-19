@@ -39,6 +39,10 @@ Qué hace:
   ejecutable suelto, el `.exe` de Windows o el `.dmg` de macOS), comprueba su firma, se
   reemplaza y vuelve a abrirse. Si la release no está firmada o no hay versión para el equipo,
   ofrece descargarla a mano. También `iureapps actualizar-lanzador`.
+- **Tema claro u oscuro**: sigue al del sistema (en Linux lo lee del portal del escritorio,
+  del tema GTK de GNOME o del esquema de KDE, y cambia en vivo si cambias el del sistema; en
+  Windows y macOS, el que informa la ventana). En *Ajustes → Apariencia* se puede fijar
+  «Clara» u «Oscura».
 - **Una sola ventana**: si ya está abierto, volver a abrirlo trae al frente la ventana existente.
 - **Verifica la firma minisign** (`.sig`) de cada instalador con la clave pública del
   actualizador de cada app antes de instalarlo; las apps que no firman (IureDesk) se
