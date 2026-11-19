@@ -2,6 +2,7 @@
 
 mod detail;
 mod markdown;
+mod system_theme;
 mod theme;
 mod view;
 
@@ -10,7 +11,7 @@ use crate::connect;
 use crate::github::{self, Release};
 use crate::installer::{self, Installed};
 use crate::plan::{self, Status};
-use crate::state::{version_cmp, Managed, State};
+use crate::state::{version_cmp, Managed, State, ThemePref};
 use crate::system::SystemInfo;
 use crate::{instance, selfupdate};
 use eframe::egui::{self, RichText};
@@ -238,6 +239,8 @@ impl LauncherApp {
         };
         let (tx, ctx2) = (app.tx.clone(), app.ctx.clone());
         instance::listen(move || Self::send(&tx, &ctx2, Msg::Wake));
+        system_theme::start(&app.ctx);
+        app.sync_theme();
         app.spawn_system();
         app.load_account();
         app.refresh_releases();
@@ -655,9 +658,51 @@ impl LauncherApp {
         }
     }
 
+    /// Tema claro u oscuro según la preferencia (o el sistema); se llama en cada fotograma.
+    fn sync_theme(&self) {
+        let dark = match self.state.theme {
+            ThemePref::Dark => true,
+            ThemePref::Light => false,
+            // Sin saber el del sistema, el oscuro de siempre.
+            ThemePref::System => system_theme::is_dark(&self.ctx).unwrap_or(true),
+        };
+        if dark != theme::is_dark() || self.ctx.theme() != Self::egui_theme(dark) {
+            theme::apply(&self.ctx, dark);
+        }
+    }
+
+    fn egui_theme(dark: bool) -> egui::Theme {
+        if dark {
+            egui::Theme::Dark
+        } else {
+            egui::Theme::Light
+        }
+    }
+
     fn settings_window(&mut self, ctx: &egui::Context) {
         let mut open = self.show_settings;
         egui::Window::new("Ajustes").open(&mut open).resizable(false).show(ctx, |ui| {
+            ui.label("Apariencia:");
+            ui.horizontal(|ui| {
+                let mut pref = self.state.theme;
+                ui.selectable_value(&mut pref, ThemePref::System, "Como el sistema");
+                ui.selectable_value(&mut pref, ThemePref::Light, "Clara");
+                ui.selectable_value(&mut pref, ThemePref::Dark, "Oscura");
+                if pref != self.state.theme {
+                    self.state.theme = pref;
+                    self.state.save();
+                    self.sync_theme();
+                }
+            });
+            if self.state.theme == ThemePref::System {
+                let now = match system_theme::is_dark(ctx) {
+                    Some(true) => "El sistema usa el tema oscuro.",
+                    Some(false) => "El sistema usa el tema claro.",
+                    None => "No se pudo saber el tema del sistema: se usa el oscuro.",
+                };
+                ui.label(RichText::new(now).small());
+            }
+            ui.separator();
             ui.label("Token de GitHub (sólo para repos privados):");
             ui.add(egui::TextEdit::singleline(&mut self.token_input).password(true).desired_width(320.0));
             ui.label(RichText::new("Basta un token de sólo lectura (Contents: read). Se guarda en el archivo de estado.").small());

@@ -3,7 +3,7 @@
 //! cursiva, código, enlaces y URL sueltas. Las URL de GitHub se acortan como lo hace GitHub
 //! (`…/pull/7` → `#7`). Lo que no reconoce se muestra como texto.
 
-use super::theme::{self, FAINT, INFO, LINE, MUTED, SURFACE_HI, TEXT};
+use super::theme::{self, pal};
 use eframe::egui::{self, RichText, Sense, Stroke, Ui};
 
 const BODY: f32 = 13.5;
@@ -327,8 +327,8 @@ fn rich(span: &Span, size: f32, color: egui::Color32) -> RichText {
     if span.code {
         t = t
             .font(theme::mono(size - 1.0))
-            .background_color(SURFACE_HI)
-            .color(TEXT);
+            .background_color(pal().surface_hi)
+            .color(pal().text);
     } else if span.bold {
         t = t.family(theme::bold());
     }
@@ -346,13 +346,13 @@ fn spans_ui(ui: &mut Ui, spans: &[Span], size: f32, color: egui::Color32) {
             match &s.url {
                 Some(url) => {
                     let r = ui
-                        .add(egui::Label::new(rich(s, size, INFO)).sense(Sense::click()))
+                        .add(egui::Label::new(rich(s, size, pal().info)).sense(Sense::click()))
                         .on_hover_cursor(egui::CursorIcon::PointingHand)
                         .on_hover_text(url);
                     if r.hovered() {
                         let y = r.rect.bottom() - 1.0;
                         ui.painter()
-                            .hline(r.rect.x_range(), y, Stroke::new(1.0, INFO));
+                            .hline(r.rect.x_range(), y, Stroke::new(1.0, pal().info));
                     }
                     if r.clicked() {
                         super::open_link(url);
@@ -388,9 +388,9 @@ pub fn show(ui: &mut Ui, md: &str) {
                         ..s.clone()
                     })
                     .collect();
-                spans_ui(ui, &spans, size, TEXT);
+                spans_ui(ui, &spans, size, pal().text);
             }
-            Block::Para(spans) => spans_ui(ui, spans, BODY, TEXT),
+            Block::Para(spans) => spans_ui(ui, spans, BODY, pal().text),
             Block::Item(level, marker, spans) => {
                 ui.horizontal_top(|ui| {
                     ui.spacing_mut().item_spacing.x = 0.0;
@@ -402,29 +402,33 @@ pub fn show(ui: &mut Ui, md: &str) {
                         egui::Align2::LEFT_CENTER,
                         marker,
                         theme::font(BODY),
-                        MUTED,
+                        pal().muted,
                     );
-                    spans_ui(ui, spans, BODY, TEXT);
+                    spans_ui(ui, spans, BODY, pal().text);
                 });
             }
             Block::Quote(spans) => {
                 let r = ui
                     .horizontal_top(|ui| {
                         ui.add_space(14.0);
-                        spans_ui(ui, spans, BODY, MUTED);
+                        spans_ui(ui, spans, BODY, pal().muted);
                     })
                     .response
                     .rect;
                 ui.painter()
-                    .vline(r.left() + 4.0, r.y_range(), Stroke::new(2.0, LINE));
+                    .vline(r.left() + 4.0, r.y_range(), Stroke::new(2.0, pal().line));
             }
             Block::Code(code) => {
                 egui::Frame::new()
-                    .fill(SURFACE_HI)
+                    .fill(pal().surface_hi)
                     .inner_margin(10)
                     .show(ui, |ui| {
                         ui.set_width(ui.available_width());
-                        ui.label(RichText::new(code).font(theme::mono(12.0)).color(TEXT));
+                        ui.label(
+                            RichText::new(code)
+                                .font(theme::mono(12.0))
+                                .color(pal().text),
+                        );
                     });
             }
             Block::Rule => {
@@ -432,13 +436,13 @@ pub fn show(ui: &mut Ui, md: &str) {
                 let w = ui.available_width();
                 let (r, _) = ui.allocate_exact_size(egui::vec2(w, 1.0), Sense::hover());
                 ui.painter()
-                    .hline(r.x_range(), r.center().y, Stroke::new(1.0, LINE));
+                    .hline(r.x_range(), r.center().y, Stroke::new(1.0, pal().line));
                 ui.add_space(2.0);
             }
         }
     }
     if blocks.is_empty() {
-        ui.label(RichText::new("Sin notas.").size(BODY).color(FAINT));
+        ui.label(RichText::new("Sin notas.").size(BODY).color(pal().faint));
     }
 }
 

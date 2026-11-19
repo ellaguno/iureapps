@@ -13,6 +13,10 @@ fn main() {
         .expect("assets/brand/logotipo.svg")
         .replace("#11295b", "#e8eaef");
     render(&logo, 192, true, &out.join("logotipo.png"));
+    // Y tal cual (letras azul marino) para el tema claro.
+    let logo_light =
+        std::fs::read_to_string("assets/brand/logotipo.svg").expect("assets/brand/logotipo.svg");
+    render(&logo_light, 192, true, &out.join("logotipo-claro.png"));
     let icon = std::fs::read_to_string("assets/brand/icono-negativo.svg")
         .expect("assets/brand/icono-negativo.svg");
     render(&icon, 256, false, &out.join("icono.png"));

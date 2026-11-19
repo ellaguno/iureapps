@@ -20,6 +20,17 @@ pub struct Pref {
     pub format: Option<Format>,
 }
 
+/// Apariencia de la ventana.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ThemePref {
+    /// Clara u oscura según el sistema.
+    #[default]
+    System,
+    Light,
+    Dark,
+}
+
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct State {
     #[serde(default)]
@@ -31,6 +42,8 @@ pub struct State {
     /// Vista de la ventana: mosaico (por defecto) o tabla.
     #[serde(default)]
     pub table_view: bool,
+    #[serde(default)]
+    pub theme: ThemePref,
 }
 
 fn path() -> PathBuf {
