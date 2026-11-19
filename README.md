@@ -118,7 +118,7 @@ al abrir la ficha, una vez por sesión o al pulsar *Comprobar*, y se guardan en
 | IureProject | `ellaguno/iureproject-releases` → `docs/screenshots/` |
 
 Las novedades de cada versión (el texto de la release en GitHub) se muestran con su formato
-Markdown: títulos, listas, negrita, código, citas y enlaces.
+Markdown: títulos, listas, tablas, negrita, código, citas y enlaces.
 
 ## Recursos
 

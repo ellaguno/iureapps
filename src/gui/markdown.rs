@@ -27,6 +27,55 @@ pub enum Block {
     Quote(Vec<Span>),
     Code(String),
     Rule,
+    /// Tabla al estilo de GitHub: encabezado y filas (cada celda con su formato).
+    Table(Vec<Vec<Span>>, Vec<Vec<Vec<Span>>>),
+}
+
+/// Celdas de una fila de tabla (`| a | b |`), o `None` si la línea no tiene `|`. Respeta
+/// `\|` y las barras dentro de `código`.
+fn table_cells(line: &str) -> Option<Vec<String>> {
+    let line = line.trim();
+    if !line.contains('|') {
+        return None;
+    }
+    let mut cells = Vec::new();
+    let mut cur = String::new();
+    let mut code = false;
+    let mut chars = line.chars().peekable();
+    while let Some(c) = chars.next() {
+        match c {
+            '\\' if chars.peek() == Some(&'|') => {
+                cur.push('|');
+                chars.next();
+            }
+            '`' => {
+                code = !code;
+                cur.push(c);
+            }
+            '|' if !code => cells.push(std::mem::take(&mut cur)),
+            _ => cur.push(c),
+        }
+    }
+    cells.push(cur);
+    // Las barras de los extremos dejan celdas vacías que no cuentan.
+    if line.starts_with('|') {
+        cells.remove(0);
+    }
+    if line.ends_with('|') && !line.ends_with("\\|") {
+        cells.pop();
+    }
+    Some(cells.into_iter().map(|c| c.trim().to_string()).collect())
+}
+
+/// ¿Es la fila separadora (`| --- | :---: |`) de una tabla de `columns` columnas?
+fn is_table_separator(line: &str, columns: usize) -> bool {
+    table_cells(line).is_some_and(|cells| {
+        cells.len() == columns
+            && cells.iter().all(|c| {
+                let d = c.trim_start_matches(':').trim_end_matches(':');
+                !d.is_empty() && d.chars().all(|ch| ch == '-')
+            })
+    })
 }
 
 /// Quita los comentarios HTML (`<!-- … -->`), que GitHub mete en las notas generadas.
@@ -100,8 +149,11 @@ pub fn parse(md: &str) -> Vec<Block> {
         }
     }
 
-    for raw in md.lines() {
-        let line = raw.trim_end();
+    let lines: Vec<&str> = md.lines().collect();
+    let mut k = 0;
+    while k < lines.len() {
+        let line = lines[k].trim_end();
+        k += 1;
         if let Some(lines) = code.as_mut() {
             if line.trim_start().starts_with("```") {
                 blocks.push(Block::Code(lines.join("\n")));
@@ -121,6 +173,27 @@ pub fn parse(md: &str) -> Vec<Block> {
         if text.is_empty() {
             flush(&mut blocks, &mut para, &mut quote, &mut item);
             continue;
+        }
+        // Tabla: fila de encabezado seguida de la separadora.
+        if let Some(header) = table_cells(text) {
+            let columns = header.len();
+            if columns > 0 && lines.get(k).is_some_and(|l| is_table_separator(l, columns)) {
+                flush(&mut blocks, &mut para, &mut quote, &mut item);
+                k += 1;
+                let mut rows = Vec::new();
+                while let Some(mut row) = lines
+                    .get(k)
+                    .filter(|l| !l.trim().is_empty())
+                    .and_then(|l| table_cells(l))
+                {
+                    row.resize(columns, String::new());
+                    rows.push(row.iter().map(|c| inline(c)).collect());
+                    k += 1;
+                }
+                let header = header.iter().map(|c| inline(c)).collect();
+                blocks.push(Block::Table(header, rows));
+                continue;
+            }
         }
         let hashes = text.chars().take_while(|c| *c == '#').count();
         if (1..=6).contains(&hashes) && text[hashes..].starts_with(' ') {
@@ -366,6 +439,45 @@ fn spans_ui(ui: &mut Ui, spans: &[Span], size: f32, color: egui::Color32) {
     });
 }
 
+/// Celda de tabla: un solo texto que se parte; si lleva un enlace, la celda lo abre.
+fn table_cell(ui: &mut Ui, spans: &[Span], header: bool) {
+    let mut job = egui::text::LayoutJob::default();
+    for s in spans {
+        let s = Span {
+            bold: s.bold || header,
+            ..s.clone()
+        };
+        let color = if s.url.is_some() {
+            pal().info
+        } else {
+            pal().text
+        };
+        rich(&s, BODY - 0.5, color).append_to(
+            &mut job,
+            ui.style(),
+            egui::FontSelection::Default,
+            egui::Align::Center,
+        );
+    }
+    let url = spans.iter().find_map(|s| s.url.clone());
+    let label = egui::Label::new(job).wrap();
+    match url {
+        Some(url) => {
+            if ui
+                .add(label.sense(Sense::click()))
+                .on_hover_cursor(egui::CursorIcon::PointingHand)
+                .on_hover_text(&url)
+                .clicked()
+            {
+                super::open_link(&url);
+            }
+        }
+        None => {
+            ui.add(label);
+        }
+    }
+}
+
 /// Dibuja `md` con el estilo del lanzador.
 pub fn show(ui: &mut Ui, md: &str) {
     let blocks = parse(md);
@@ -429,6 +541,32 @@ pub fn show(ui: &mut Ui, md: &str) {
                                 .font(theme::mono(12.0))
                                 .color(pal().text),
                         );
+                    });
+            }
+            Block::Table(header, rows) => {
+                let columns = header.len().max(1) as f32;
+                let max_col = ((ui.available_width() - 20.0) / columns * 1.8).max(80.0);
+                egui::Frame::new()
+                    .stroke(Stroke::new(1.0, pal().line))
+                    .inner_margin(8)
+                    .show(ui, |ui| {
+                        egui::Grid::new(("md-table", k))
+                            .num_columns(header.len())
+                            .striped(true)
+                            .spacing([18.0, 6.0])
+                            .max_col_width(max_col)
+                            .show(ui, |ui| {
+                                for c in header {
+                                    table_cell(ui, c, true);
+                                }
+                                ui.end_row();
+                                for row in rows {
+                                    for c in row {
+                                        table_cell(ui, c, false);
+                                    }
+                                    ui.end_row();
+                                }
+                            });
                     });
             }
             Block::Rule => {
@@ -546,5 +684,32 @@ mod tests {
             "0123456"
         );
         assert_eq!(short_url("https://iurefficient.com/"), "iurefficient.com");
+    }
+
+    /// Notas como las de IureOCR: tabla con código en las celdas, luego un párrafo.
+    #[test]
+    fn tablas() {
+        let md = "Elige el de tu sistema:\r\n\r\n| Archivo | Sistema |\r\n| --- | :---: |\r\n\
+                  | `*_1-windows-x64.exe` / `.msi` | Windows 10/11 |\r\n\
+                  | `a|b` | Linux \\| BSD | sobra |\r\n\r\nVer [CHANGELOG](https://x.com/c).";
+        let b = parse(md);
+        assert_eq!(b.len(), 3, "{b:#?}");
+        match &b[1] {
+            Block::Table(h, rows) => {
+                assert_eq!(h.len(), 2);
+                assert_eq!(text(&h[0]), "Archivo");
+                assert_eq!(rows.len(), 2);
+                assert!(rows[0][0][0].code);
+                assert_eq!(text(&rows[0][0]), "*_1-windows-x64.exe / .msi");
+                assert_eq!(text(&rows[1][0]), "a|b");
+                assert_eq!(text(&rows[1][1]), "Linux | BSD");
+                // Las celdas de más se descartan.
+                assert_eq!(rows[1].len(), 2);
+            }
+            other => panic!("{other:?}"),
+        }
+        assert!(matches!(&b[2], Block::Para(_)));
+        // Sin fila separadora no es tabla.
+        assert!(matches!(parse("a | b\nc | d").as_slice(), [Block::Para(_)]));
     }
 }
