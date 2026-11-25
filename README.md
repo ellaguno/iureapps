@@ -182,6 +182,27 @@ scripts/apple-secrets.sh ~/apple-certs
 ```
  El icono (PNG y el `.icns` de macOS) se regenera con `python3 scripts/icono.py`. El lanzador avisa cuando hay una versión suya más nueva.
 
+### Microsoft Store (MSIX)
+
+El job de Windows de `build.yml` genera dos artefactos (no van a la release):
+
+- `msix-store`: `iureapps-windows-x64.msix`, sin firmar, para subir a Partner Center (la
+  Store lo firma).
+- `msix-prueba`: el mismo paquete firmado con un certificado de prueba y su `.cer`. Para
+  instalarlo a mano: importar el `.cer` en *Equipo local → Personas de confianza* y abrir el
+  `.msix`.
+
+La identidad del paquete sale de Partner Center (*Identidad del producto*) y va en tres
+variables del repo (*Settings → Secrets and variables → Actions → Variables*):
+`MSIX_IDENTITY_NAME` (`Package/Identity/Name`), `MSIX_PUBLISHER` (`Package/Identity/Publisher`,
+`CN=…`) y `MSIX_PUBLISHER_DISPLAY_NAME` (`Package/Properties/PublisherDisplayName`). Sin ellas
+el paquete lleva una identidad de prueba que Partner Center rechaza.
+
+El manifiesto (`assets/windows/msix/AppxManifest.xml`) desactiva la virtualización de AppData
+y del registro (capacidad restringida `unvirtualizedResources`) para que lo que instala el
+lanzador quede en su sitio real; al enviarlo hay que justificarla. Instalado desde la Store,
+el lanzador no se actualiza solo: lo actualiza la Store.
+
 ## Agregar una app
 
 Una entrada en `APPS` de `src/catalog.rs`: repo (el de descargas si el código es privado),
