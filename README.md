@@ -203,6 +203,10 @@ y del registro (capacidad restringida `unvirtualizedResources`) para que lo que 
 lanzador quede en su sitio real; al enviarlo hay que justificarla. Instalado desde la Store,
 el lanzador no se actualiza solo: lo actualiza la Store.
 
+La versión del paquete es la de `Cargo.toml` con el primer número más 1 y un `.0` al final
+(`0.1.17` → `1.1.17.0`), porque la Store no acepta un primer número 0 y exige el cuarto en 0;
+es el mismo esquema que IureProject. Cada envío necesita una versión mayor que la anterior.
+
 ## Agregar una app
 
 Una entrada en `APPS` de `src/catalog.rs`: repo (el de descargas si el código es privado),

@@ -101,9 +101,16 @@ jobs:
           $identity = if ($env:MSIX_IDENTITY_NAME) { $env:MSIX_IDENTITY_NAME } else { 'Iurefficient.IurefficientApps' }
           $publisher = if ($env:MSIX_PUBLISHER) { $env:MSIX_PUBLISHER } else { 'CN=Iurefficient' }
           $display = if ($env:MSIX_PUBLISHER_DISPLAY_NAME) { $env:MSIX_PUBLISHER_DISPLAY_NAME } else { 'Iurefficient' }
-          # x.y.z.0, sin sufijo de versión preliminar.
-          $version = (Select-String -Path Cargo.toml -Pattern '^version = "([^"]+)"' | Select-Object -First 1).Matches.Groups[1].Value
-          $version = ($version -replace '-.*$', '') + '.0'
+          # La Store no acepta un primer número 0 y exige el cuarto en 0: 0.1.17 → 1.1.17.0
+          # (igual que IureProject). Siempre crece; la 1.0.0 será 2.0.0.0.
+          $cargo = (Select-String -Path Cargo.toml -Pattern '^version = "([^"]+)"' | Select-Object -First 1).Matches.Groups[1].Value
+          $parts = ($cargo -replace '-.*$', '').Split('.')
+          $version = "$([int]$parts[0] + 1).$($parts[1]).$($parts[2]).0"
+          Write-Output "Versión del paquete: $version"
+          # Los valores van dentro de atributos XML.
+          $identity = [System.Security.SecurityElement]::Escape($identity)
+          $publisher = [System.Security.SecurityElement]::Escape($publisher)
+          $display = [System.Security.SecurityElement]::Escape($display)
 
           $sdk = Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\bin" -Directory |
             Where-Object { $_.Name -match '^10\.' -and (Test-Path "$($_.FullName)\x64\makeappx.exe") } |
@@ -139,6 +146,16 @@ jobs:
           & "$tools\signtool.exe" sign /fd SHA256 /f msix\prueba.pfx /p prueba msix\prueba\iureapps-windows-x64-prueba.msix
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           Remove-Item msix\prueba.pfx
+
+          # Prueba: instalar la copia firmada, abrir la CLI por su alias y desinstalar.
+          Import-Certificate -FilePath msix\prueba\iureapps-prueba.cer -CertStoreLocation Cert:\LocalMachine\TrustedPeople | Out-Null
+          Add-AppxPackage -Path msix\prueba\iureapps-windows-x64-prueba.msix
+          $pkg = Get-AppxPackage | Where-Object { $_.Name -eq $identity -or $_.Name -eq 'Iurefficient.IurefficientApps' } | Select-Object -First 1
+          Write-Output "Instalado: $($pkg.PackageFullName)"
+          $out = & "$env:LOCALAPPDATA\Microsoft\WindowsApps\iureapps.exe" --version 2>&1
+          Write-Output "iureapps --version (alias): $out"
+          Remove-AppxPackage -Package $pkg.PackageFullName
+          if ("$out" -notmatch 'iureapps') { Write-Output "::error::La CLI no respondió dentro del paquete MSIX"; exit 1 }
           Get-ChildItem msix\store, msix\prueba
       - name: Subir el MSIX para la Store
         if: runner.os == 'Windows'
