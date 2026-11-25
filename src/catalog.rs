@@ -12,8 +12,8 @@ pub enum Packaging {
     /// Instaladores de Tauri con el esquema de nombres de arriba.
     Tauri,
     /// IureVoz: cargo-deb, cargo-generate-rpm, Inno Setup y WiX con el esquema de nombres de
-    /// Tauri (`IureVoz-<ver>-linux-x64.deb`, `-linux-x64.rpm`, `-windows-x64.exe`) y
-    /// `SHA256SUMS`. El `.exe` es de Inno Setup: se instala con `/VERYSILENT`, no con `/S`.
+    /// Tauri (`IureVoz-<ver>-linux-x64.deb`, `-linux-x64.rpm`, `-windows-x64.exe`,
+    /// `-macos-universal.app.tar.gz`) y `SHA256SUMS`. El `.exe` es de Inno Setup: se instala con `/VERYSILENT`, no con `/S`.
     Inno,
     /// Apps en Rust de la suite (`cargo xtask dist` / `package`), con `SHA256SUMS`:
     /// `<bin>-<ver>-x86_64-linux.tar.gz` y, con cargo-packager, `<bin>_<ver>_x86_64.AppImage`,
@@ -46,7 +46,7 @@ pub struct AppDef {
     pub note: &'static str,
 }
 
-const KEY_8F1B: &str = "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDhGMUI0OEUxNjg1NjE1MjUKUldRbEZWWm80VWdiajlpRzB5WFRKY0RFZ01VVGN0TVMrV01LQjZWTUNTa3JsV0VoMFRWQTlmbmUK";
+pub(crate) const KEY_8F1B: &str = "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDhGMUI0OEUxNjg1NjE1MjUKUldRbEZWWm80VWdiajlpRzB5WFRKY0RFZ01VVGN0TVMrV01LQjZWTUNTa3JsV0VoMFRWQTlmbmUK";
 const KEY_E017: &str = "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEUwMTc4NjI1QkY2NjQyQ0IKUldUTFFtYS9KWVlYNEw1ZDQ0VEJNK2pQMGQ2UEJTSWJnZEhyOXZnVUYzWFRURUM5S1RJVmdpbGEK";
 /// Clave de IureDesk (`docs/minisign.pub` de su repo, en base64). No es Tauri: firma con
 /// `cargo xtask sign`, en el mismo formato.
@@ -127,16 +127,16 @@ pub static APPS: &[AppDef] = &[
         repo: "ellaguno/iurevoz",
         description: "Dictado y control del escritorio por voz, local y sólo CPU.",
         tagline: "Dictado por voz",
-        hint: "Local y sin GPU; GNOME en Wayland y Windows",
+        hint: "Local y sin GPU; GNOME en Wayland, Windows y macOS",
         accent: [139, 92, 246],
         experimental: false,
         packaging: Packaging::Inno,
-        // macOS se agrega cuando IureVoz tenga versión para Mac.
-        oses: &[Os::Linux, Os::Windows],
+        // macOS desde la 0.4.0 (app universal; las versiones anteriores no la publicaron).
+        oses: ALL,
         gpu_variants: false,
         linux_bins: &["iurevoz"],
         pubkey: None,
-        note: "Versión alfa. En Linux, pensado para GNOME en Wayland; en Windows se instala para el usuario.",
+        note: "Versión alfa. En Linux, pensado para GNOME en Wayland; en Windows se instala para el usuario; en macOS pide permiso de micrófono y de Accesibilidad (para escribir lo dictado).",
     },
     AppDef {
         id: "iuredesk",
@@ -148,7 +148,7 @@ pub static APPS: &[AppDef] = &[
         hint: "Reemplaza Outlook, Thunderbird y Apple Mail",
         // Azul del logotipo de Iurefficient (`iurefficient-ui`, `tokens::brand::BLUE`).
         accent: [6, 80, 236],
-        experimental: true,
+        experimental: false,
         // Rust puro (cargo-packager), pero publica con el esquema de nombres de Tauri y firma
         // minisign (`cargo xtask package` y `cargo xtask sign` de IureDesk).
         packaging: Packaging::Tauri,
@@ -156,7 +156,7 @@ pub static APPS: &[AppDef] = &[
         gpu_variants: false,
         linux_bins: &["iuredesk"],
         pubkey: Some(KEY_3B1C),
-        note: "Versión alfa.",
+        note: "Versión alfa. Windows: instalador .exe (por usuario) o .msi (para todo el equipo).",
     },
     AppDef {
         id: "iureproject",
@@ -168,13 +168,13 @@ pub static APPS: &[AppDef] = &[
         accent: [34, 197, 94],
         experimental: false,
         packaging: Packaging::Packager,
-        // Windows: el .msi desde la 0.2.0-alpha.15. macOS (.dmg) falta probarlo en un Mac.
-        oses: &[Os::Linux, Os::Windows],
+        // Windows: el .msi desde la 0.2.0-alpha.15. macOS: .dmg universal, firmado y notarizado.
+        oses: ALL,
         gpu_variants: false,
         linux_bins: &["iureproject"],
         pubkey: None,
         note:
-            "Versión alfa. Linux x64 (.deb o .tar.gz) y Windows (.msi); macOS, en su página de descargas.",
+            "Versión alfa. Linux x64 (.deb, .rpm o .tar.gz), Windows (.msi) y macOS (.dmg universal).",
     },
 ];
 
@@ -392,6 +392,9 @@ impl AppDef {
                     (Os::Linux, Arch::X64, Format::Deb) => &["_amd64.deb"],
                     (Os::Linux, Arch::Arm64, Format::AppImage) => &["_aarch64.AppImage"],
                     (Os::Linux, Arch::Arm64, Format::Deb) => &["_arm64.deb"],
+                    // El .rpm de `cargo xtask dist` de IureProject (`iureproject-<v>-1.x86_64.rpm`).
+                    (Os::Linux, Arch::X64, Format::Rpm) => &[".x86_64.rpm"],
+                    (Os::Linux, Arch::Arm64, Format::Rpm) => &[".aarch64.rpm"],
                     (Os::Linux, Arch::X64, Format::TarGz) => &["-x86_64-linux.tar.gz"],
                     (Os::Linux, Arch::Arm64, Format::TarGz) => &["-aarch64-linux.tar.gz"],
                     (Os::Windows, Arch::Arm64, Format::WinExe) => {
@@ -400,8 +403,14 @@ impl AppDef {
                     (Os::Windows, _, Format::WinExe) => &["_x64-setup.exe"],
                     // El .msi de `cargo xtask dist` de IureProject (x64; Windows ARM lo emula).
                     (Os::Windows, _, Format::Msi) => &["-x86_64-windows.msi"],
-                    (Os::MacOs, Arch::Arm64, Format::MacApp) => &["_aarch64.dmg", "_universal.dmg"],
-                    (Os::MacOs, Arch::X64, Format::MacApp) => &["_x64.dmg", "_universal.dmg"],
+                    // `cargo xtask dist --target macos` de IureProject: la `.app` universal en
+                    // `iureproject-<v>-macos-universal.dmg`.
+                    (Os::MacOs, Arch::Arm64, Format::MacApp) => {
+                        &["_aarch64.dmg", "_universal.dmg", "-macos-universal.dmg"]
+                    }
+                    (Os::MacOs, Arch::X64, Format::MacApp) => {
+                        &["_x64.dmg", "_universal.dmg", "-macos-universal.dmg"]
+                    }
                     _ => return None,
                 };
                 ends.iter()
@@ -663,6 +672,8 @@ mod tests {
             "IureVoz-0.3.0-windows-x64.exe",
             "IureVoz-0.3.0-windows-x64.msi",
             "IureVoz-0.3.0-windows-x64.zip",
+            "IureVoz-0.3.0-macos-universal.dmg",
+            "IureVoz-0.3.0-macos-universal.app.tar.gz",
             "SHA256SUMS",
         ];
         let r = Release {
@@ -694,9 +705,14 @@ mod tests {
             "IureVoz-0.3.0-windows-x64.exe"
         );
         assert!(n(Os::Linux, Arch::X64, Format::AppImage).is_none());
-        assert!(!find("iurevoz")
-            .unwrap()
-            .supports(&sys(Os::MacOs, Arch::Arm64)));
+        // la misma app universal en Apple Silicon y en Intel
+        for arch in [Arch::Arm64, Arch::X64] {
+            assert!(find("iurevoz").unwrap().supports(&sys(Os::MacOs, arch)));
+            assert_eq!(
+                n(Os::MacOs, arch, Format::MacApp).unwrap(),
+                "IureVoz-0.3.0-macos-universal.app.tar.gz"
+            );
+        }
     }
 
     /// Nombres que publica `cargo xtask package` de IureDesk (esquema de Tauri).
@@ -747,6 +763,57 @@ mod tests {
             .unwrap();
         assert_eq!(sig.unwrap().name, format!("{v}-linux-x64.AppImage.sig"));
         assert!(app.pubkey.is_some());
+    }
+
+    /// Lo que publica hoy `cargo xtask dist` de IureProject (Linux, Windows y macOS).
+    #[test]
+    fn picks_iureproject_dist() {
+        let v = "0.2.0-alpha.24";
+        let names = [
+            format!("iureproject-{v}-x86_64-linux.tar.gz"),
+            "iureproject_0.2.0.alpha.24_amd64.deb".to_string(),
+            "iureproject-0.2.0.alpha.24-1.x86_64.rpm".to_string(),
+            format!("iureproject-{v}-x86_64-windows.zip"),
+            format!("iureproject-{v}-x86_64-windows.msi"),
+            format!("iureproject-{v}-macos-universal.zip"),
+            format!("iureproject-{v}-macos-universal.dmg"),
+            "SHA256SUMS".to_string(),
+        ];
+        let r = Release {
+            tag_name: format!("v{v}"),
+            html_url: String::new(),
+            body: None,
+            published_at: None,
+            assets: names
+                .iter()
+                .map(|n| Asset {
+                    name: n.clone(),
+                    size: 1,
+                    browser_download_url: String::new(),
+                    url: String::new(),
+                })
+                .collect(),
+        };
+        let p = |s: &SystemInfo, f| pick("iureproject", &r, s, Variant::Cpu, f);
+        let linux = sys(Os::Linux, Arch::X64);
+        assert_eq!(
+            p(&linux, Format::Rpm).unwrap(),
+            "iureproject-0.2.0.alpha.24-1.x86_64.rpm"
+        );
+        assert_eq!(
+            p(&linux, Format::Deb).unwrap(),
+            "iureproject_0.2.0.alpha.24_amd64.deb"
+        );
+        assert!(p(&linux, Format::AppImage).is_none());
+        for arch in [Arch::Arm64, Arch::X64] {
+            assert_eq!(
+                p(&sys(Os::MacOs, arch), Format::MacApp).unwrap(),
+                format!("iureproject-{v}-macos-universal.dmg")
+            );
+        }
+        assert!(find("iureproject")
+            .unwrap()
+            .supports(&sys(Os::MacOs, Arch::Arm64)));
     }
 
     #[test]

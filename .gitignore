@@ -1,1 +1,11 @@
 /target
+/dist
+
+# Material de firma de Apple: nunca al repo.
+*.p12
+*.p8
+*.key
+*.cer
+*.pem
+*.mobileprovision
+*.provisionprofile

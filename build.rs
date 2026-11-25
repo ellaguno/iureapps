@@ -13,25 +13,13 @@ fn main() {
         .expect("assets/brand/logotipo.svg")
         .replace("#11295b", "#e8eaef");
     render(&logo, 192, true, &out.join("logotipo.png"));
+    // Y tal cual (letras azul marino) para el tema claro.
+    let logo_light =
+        std::fs::read_to_string("assets/brand/logotipo.svg").expect("assets/brand/logotipo.svg");
+    render(&logo_light, 192, true, &out.join("logotipo-claro.png"));
     let icon = std::fs::read_to_string("assets/brand/icono-negativo.svg")
         .expect("assets/brand/icono-negativo.svg");
     render(&icon, 256, false, &out.join("icono.png"));
-    windows_resources();
-}
-
-/// En Windows, incrusta el icono y la descripción en el ejecutable.
-fn windows_resources() {
-    println!("cargo:rerun-if-changed=assets/windows/iureapps.ico");
-    #[cfg(windows)]
-    if std::env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("windows") {
-        let mut res = winresource::WindowsResource::new();
-        res.set_icon("assets/windows/iureapps.ico")
-            .set("ProductName", "Iurefficient Apps")
-            .set("FileDescription", "Iurefficient Apps")
-            .set("CompanyName", "Iurefficient");
-        res.compile()
-            .expect("no se pudo incrustar el icono en el .exe");
-    }
 }
 
 /// `crop`: recorta el margen del SVG y deja sólo lo dibujado.

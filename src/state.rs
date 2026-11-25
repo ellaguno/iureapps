@@ -20,7 +20,18 @@ pub struct Pref {
     pub format: Option<Format>,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+/// Apariencia de la ventana.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ThemePref {
+    /// Clara u oscura según el sistema.
+    #[default]
+    System,
+    Light,
+    Dark,
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct State {
     #[serde(default)]
     pub installs: BTreeMap<String, Managed>,
@@ -31,25 +42,8 @@ pub struct State {
     /// Vista de la ventana: mosaico (por defecto) o tabla.
     #[serde(default)]
     pub table_view: bool,
-    /// Instalar sola la versión nueva del lanzador cuando no hace falta contraseña.
-    #[serde(default = "yes")]
-    pub auto_update: bool,
-}
-
-fn yes() -> bool {
-    true
-}
-
-impl Default for State {
-    fn default() -> Self {
-        State {
-            installs: BTreeMap::new(),
-            prefs: BTreeMap::new(),
-            github_token: None,
-            table_view: false,
-            auto_update: true,
-        }
-    }
+    #[serde(default)]
+    pub theme: ThemePref,
 }
 
 fn path() -> PathBuf {
@@ -92,7 +86,15 @@ pub fn version_cmp(a: &str, b: &str) -> std::cmp::Ordering {
 fn pre(v: &str) -> Option<Vec<&str>> {
     let v = v.trim().trim_start_matches('v');
     let rest = v.trim_start_matches(|c: char| c.is_ascii_digit() || c == '.');
-    let rest = rest.strip_prefix('-')?;
+    // Debian y RPM escriben la preliminar con `~` (`0.2.0~alpha.16`, así la reporta dpkg) y
+    // pueden añadir su revisión al final (`0.2.0~alpha.16-1`), que no cuenta.
+    let rest = match rest.strip_prefix('~') {
+        Some(r) => match r.rsplit_once('-') {
+            Some((head, rev)) if !rev.is_empty() && rev.chars().all(|c| c.is_ascii_digit()) => head,
+            _ => r,
+        },
+        None => rest.strip_prefix('-')?,
+    };
     // Sin letra al principio es la revisión de Debian/RPM (`-1`), no una preliminar.
     if !rest.starts_with(|c: char| c.is_ascii_alphabetic()) {
         return None;
@@ -167,5 +169,14 @@ mod tests {
         assert_eq!(version_cmp("0.1.0-alpha", "0.1.0-alpha.1"), Less);
         // La revisión de Debian sigue sin contar.
         assert_eq!(version_cmp("0.2.1-1", "0.2.1"), Equal);
+    }
+
+    #[test]
+    fn compares_debian_tilde_prereleases() {
+        // dpkg reporta `0.2.0~alpha.16` para el .deb de `0.2.0-alpha.16`.
+        assert_eq!(version_cmp("0.2.0~alpha.16", "0.2.0-alpha.24"), Less);
+        assert_eq!(version_cmp("0.2.0~alpha.24", "v0.2.0-alpha.24"), Equal);
+        assert_eq!(version_cmp("0.2.0~alpha.24-1", "0.2.0-alpha.24"), Equal);
+        assert_eq!(version_cmp("0.2.0~alpha.24", "0.2.0"), Less);
     }
 }

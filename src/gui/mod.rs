@@ -1,5 +1,8 @@
 //! Interfaz gráfica (egui): mosaico de apps con su icono, estado y acciones.
 
+mod detail;
+mod markdown;
+mod system_theme;
 mod theme;
 mod view;
 
@@ -8,10 +11,11 @@ use crate::connect;
 use crate::github::{self, Release};
 use crate::installer::{self, Installed};
 use crate::plan::{self, Status};
-use crate::selfupdate;
-use crate::state::{Managed, State};
+use crate::state::{version_cmp, Managed, State, ThemePref};
 use crate::system::SystemInfo;
+use crate::{instance, selfupdate};
 use eframe::egui::{self, RichText};
+use std::collections::HashMap;
 use std::sync::mpsc::{channel, Receiver, Sender};
 use std::time::Instant;
 
@@ -20,8 +24,6 @@ enum Msg {
     Detected(usize, Option<Installed>),
     Release(usize, Result<Release, String>),
     SelfRelease(Release),
-    SelfProgress(f32),
-    SelfDone(Result<selfupdate::Outcome, String>),
     Progress(usize, f32),
     Log(String),
     Done(usize, Result<Option<Managed>, String>),
@@ -29,6 +31,17 @@ enum Msg {
     AccountVerified(Result<String, String>),
     LoginDone(Result<connect::LoginOutcome, String>),
     LogoutDone(Result<(), String>),
+    Shots(usize, Result<Vec<(String, egui::ColorImage)>, String>),
+    /// Otra instancia pidió que esta ventana se muestre.
+    Wake,
+    SelfProgress(f32),
+    SelfDone(Result<selfupdate::Relaunch, String>),
+}
+
+/// Actualización del propio lanzador.
+enum SelfUpdate {
+    Running(f32),
+    Failed(String),
 }
 
 /// Estado de la cuenta de Iurefficient compartida.
@@ -61,19 +74,6 @@ struct LoginForm {
     focused: bool,
 }
 
-/// Autoactualización del lanzador.
-#[derive(Default)]
-struct SelfUpdate {
-    /// Versión nueva publicada.
-    release: Option<Release>,
-    /// Se instala sola (no pide contraseña ni elevación).
-    silent: bool,
-    progress: Option<f32>,
-    error: Option<String>,
-    /// Versión ya instalada a la espera de reiniciar.
-    ready: Option<(std::path::PathBuf, String)>,
-}
-
 #[derive(Default)]
 struct Row {
     release: Option<Result<Release, String>>,
@@ -92,6 +92,21 @@ enum Filter {
     NotInstalled,
 }
 
+/// Ficha abierta en lugar del mosaico.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Selected {
+    Account,
+    App(usize),
+}
+
+/// Capturas de la ficha de una app.
+enum Shots {
+    Loading,
+    /// Pie de foto y textura; vacía si la app no publica capturas.
+    Ready(Vec<(String, egui::TextureHandle)>),
+    Failed(String),
+}
+
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum ViewMode {
     Grid,
@@ -106,7 +121,7 @@ pub struct LauncherApp {
     rows: Vec<Row>,
     state: State,
     log: Vec<String>,
-    self_update: SelfUpdate,
+    self_update: Option<Release>,
     show_settings: bool,
     show_system: bool,
     show_log: bool,
@@ -121,9 +136,21 @@ pub struct LauncherApp {
     account: AccountState,
     login: Option<LoginForm>,
     confirm_logout: bool,
+    selected: Option<Selected>,
+    shots: HashMap<usize, Shots>,
+    /// Captura ampliada: (app, índice).
+    viewer: Option<(usize, usize)>,
+    self_updating: Option<SelfUpdate>,
 }
 
 pub fn run() -> Result<(), String> {
+    // Ya abierto: se trae al frente esa ventana. Tras actualizarse, la versión nueva no cede
+    // ante la anterior, que se está cerrando.
+    if std::env::var_os(selfupdate::RESTARTED_ENV).is_some() {
+        std::env::remove_var(selfupdate::RESTARTED_ENV);
+    } else if instance::wake_existing() {
+        return Ok(());
+    }
     let mut viewport = egui::ViewportBuilder::default();
     if let Some(icon) = theme::window_icon() {
         viewport = viewport.with_icon(icon);
@@ -191,7 +218,7 @@ impl LauncherApp {
             token_input: state.github_token.clone().unwrap_or_default(),
             state,
             log: Vec::new(),
-            self_update: SelfUpdate::default(),
+            self_update: None,
             show_settings: false,
             show_system: false,
             show_log: false,
@@ -205,7 +232,15 @@ impl LauncherApp {
             account: AccountState::default(),
             login: None,
             confirm_logout: false,
+            selected: None,
+            shots: HashMap::new(),
+            viewer: None,
+            self_updating: None,
         };
+        let (tx, ctx2) = (app.tx.clone(), app.ctx.clone());
+        instance::listen(move || Self::send(&tx, &ctx2, Msg::Wake));
+        system_theme::start(&app.ctx);
+        app.sync_theme();
         app.spawn_system();
         app.load_account();
         app.refresh_releases();
@@ -280,34 +315,8 @@ impl LauncherApp {
                     }
                 }
                 Msg::SelfRelease(r) => {
-                    let u = &mut self.self_update;
-                    if selfupdate::is_newer(&r) && u.progress.is_none() && u.ready.is_none() {
-                        u.silent = selfupdate::method().is_ok_and(|m| m.is_silent());
-                        u.release = Some(r);
-                        if u.silent && self.state.auto_update {
-                            self.start_self_update();
-                        }
-                    }
-                }
-                Msg::SelfProgress(p) => self.self_update.progress = Some(p),
-                Msg::SelfDone(r) => {
-                    let u = &mut self.self_update;
-                    u.progress = None;
-                    match r {
-                        Ok(selfupdate::Outcome::Restart { exe, version }) => {
-                            self.log
-                                .push(format!("Iurefficient Apps {version} instalada"));
-                            u.ready = Some((exe, version));
-                            self.update_dismissed = false;
-                        }
-                        Ok(selfupdate::Outcome::Exit) => {
-                            self.ctx.send_viewport_cmd(egui::ViewportCommand::Close);
-                        }
-                        Err(e) => {
-                            self.log.push(format!("Iurefficient Apps: {e}"));
-                            u.error = Some(e);
-                            self.update_dismissed = false;
-                        }
+                    if version_cmp(r.version(), env!("CARGO_PKG_VERSION")).is_gt() {
+                        self.self_update = Some(r);
                     }
                 }
                 Msg::Progress(i, p) => self.rows[i].progress = Some(p),
@@ -340,6 +349,41 @@ impl LauncherApp {
                     }
                 }
                 Msg::LoginDone(r) => self.login_done(r),
+                Msg::Wake => {
+                    use egui::ViewportCommand as V;
+                    self.ctx.send_viewport_cmd(V::Visible(true));
+                    self.ctx.send_viewport_cmd(V::Minimized(false));
+                    self.ctx.send_viewport_cmd(V::Focus);
+                    self.ctx.send_viewport_cmd(V::RequestUserAttention(
+                        egui::UserAttentionType::Informational,
+                    ));
+                }
+                Msg::SelfProgress(p) => self.self_updating = Some(SelfUpdate::Running(p)),
+                Msg::SelfDone(r) => self.self_update_done(r),
+                Msg::Shots(i, r) => {
+                    let shots = match r {
+                        Ok(images) => Shots::Ready(
+                            images
+                                .into_iter()
+                                .enumerate()
+                                .map(|(k, (caption, img))| {
+                                    let name = format!("shot-{}-{k}", APPS[i].id);
+                                    let tex = self.ctx.load_texture(
+                                        name,
+                                        img,
+                                        egui::TextureOptions::LINEAR,
+                                    );
+                                    (caption, tex)
+                                })
+                                .collect(),
+                        ),
+                        Err(e) => {
+                            self.log.push(format!("{}: capturas: {e}", APPS[i].name));
+                            Shots::Failed(e)
+                        }
+                    };
+                    self.shots.insert(i, shots);
+                }
                 Msg::LogoutDone(r) => {
                     self.account.busy = false;
                     match r {
@@ -437,47 +481,6 @@ impl LauncherApp {
         });
     }
 
-    /// Descarga e instala la versión nueva del lanzador en segundo plano.
-    fn start_self_update(&mut self) {
-        let Some(release) = self.self_update.release.clone() else {
-            return;
-        };
-        if self.self_update.progress.is_some() {
-            return;
-        }
-        self.self_update.progress = Some(0.0);
-        self.self_update.error = None;
-        let (tx, ctx) = (self.tx.clone(), self.ctx.clone());
-        std::thread::spawn(move || {
-            let (tx2, ctx2) = (tx.clone(), ctx.clone());
-            let log = move |m: String| {
-                Self::send(&tx2, &ctx2, Msg::Log(format!("Iurefficient Apps: {m}")))
-            };
-            let (tx3, ctx3) = (tx.clone(), ctx.clone());
-            let last = std::cell::Cell::new(0.0f32);
-            let progress = move |p: f32| {
-                if p - last.get() >= 0.01 || p >= 1.0 {
-                    last.set(p);
-                    Self::send(&tx3, &ctx3, Msg::SelfProgress(p));
-                }
-            };
-            let r = selfupdate::update(&release, &log, &progress);
-            Self::send(&tx, &ctx, Msg::SelfDone(r));
-        });
-    }
-
-    /// Reinicia con la versión ya instalada si no hay ninguna operación en curso.
-    fn restart_self(&mut self) {
-        if self.rows.iter().any(|r| r.busy.is_some()) || self.account.busy {
-            self.log
-                .push("Espera a que terminen las instalaciones en curso para reiniciar".into());
-            return;
-        }
-        if let Some((exe, _)) = &self.self_update.ready {
-            selfupdate::restart(exe);
-        }
-    }
-
     fn start_uninstall(&mut self, i: usize) {
         let Some(inst) = self.rows[i].installed.clone() else {
             return;
@@ -498,6 +501,78 @@ impl LauncherApp {
                 Err(e) => self.rows[i].error = Some(e),
             }
         }
+    }
+
+    fn start_self_update(&mut self) {
+        let (Some(sys), Some(release)) = (&self.sys, &self.self_update) else {
+            return;
+        };
+        let plan = match selfupdate::plan(release, sys) {
+            Ok(p) => p,
+            Err(e) => {
+                self.self_updating = Some(SelfUpdate::Failed(e));
+                return;
+            }
+        };
+        self.log.push(format!(
+            "Iurefficient Apps: actualizando a {}",
+            release.version()
+        ));
+        self.self_updating = Some(SelfUpdate::Running(0.0));
+        let (tx, ctx, token) = (self.tx.clone(), self.ctx.clone(), self.token());
+        std::thread::spawn(move || {
+            let (tx2, ctx2) = (tx.clone(), ctx.clone());
+            let log = move |m: String| {
+                Self::send(&tx2, &ctx2, Msg::Log(format!("Iurefficient Apps: {m}")))
+            };
+            let (tx3, ctx3) = (tx.clone(), ctx.clone());
+            let last = std::cell::Cell::new(0.0f32);
+            let progress = move |p: f32| {
+                if p - last.get() >= 0.01 || p >= 1.0 {
+                    last.set(p);
+                    Self::send(&tx3, &ctx3, Msg::SelfProgress(p));
+                }
+            };
+            let r = selfupdate::apply(&plan, token.as_deref(), &log, &progress);
+            Self::send(&tx, &ctx, Msg::SelfDone(r));
+        });
+    }
+
+    /// Instalada la versión nueva: se abre y esta ventana se cierra.
+    fn self_update_done(&mut self, r: Result<selfupdate::Relaunch, String>) {
+        let r = r.and_then(|target| {
+            instance::release();
+            selfupdate::relaunch(&target)
+        });
+        match r {
+            Ok(()) => {
+                self.log
+                    .push("Iurefficient Apps: versión nueva instalada; reiniciando".into());
+                self.ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+            }
+            Err(e) => {
+                self.log.push(format!("Iurefficient Apps: {e}"));
+                self.self_updating = Some(SelfUpdate::Failed(e));
+            }
+        }
+    }
+
+    /// Descarga (o lee de la caché) las capturas de la app `i`, una vez por sesión.
+    fn load_shots(&mut self, i: usize) {
+        if self.shots.contains_key(&i) {
+            return;
+        }
+        self.shots.insert(i, Shots::Loading);
+        let (tx, ctx, token) = (self.tx.clone(), self.ctx.clone(), self.token());
+        std::thread::spawn(move || {
+            let r = crate::shots::load(&APPS[i], token.as_deref()).map(|shots| {
+                shots
+                    .into_iter()
+                    .filter_map(|s| Some((s.caption, theme::decode_shot(&s.png)?)))
+                    .collect()
+            });
+            Self::send(&tx, &ctx, Msg::Shots(i, r));
+        });
     }
 
     fn load_account(&self) {
@@ -583,9 +658,51 @@ impl LauncherApp {
         }
     }
 
+    /// Tema claro u oscuro según la preferencia (o el sistema); se llama en cada fotograma.
+    fn sync_theme(&self) {
+        let dark = match self.state.theme {
+            ThemePref::Dark => true,
+            ThemePref::Light => false,
+            // Sin saber el del sistema, el oscuro de siempre.
+            ThemePref::System => system_theme::is_dark(&self.ctx).unwrap_or(true),
+        };
+        if dark != theme::is_dark() || self.ctx.theme() != Self::egui_theme(dark) {
+            theme::apply(&self.ctx, dark);
+        }
+    }
+
+    fn egui_theme(dark: bool) -> egui::Theme {
+        if dark {
+            egui::Theme::Dark
+        } else {
+            egui::Theme::Light
+        }
+    }
+
     fn settings_window(&mut self, ctx: &egui::Context) {
         let mut open = self.show_settings;
         egui::Window::new("Ajustes").open(&mut open).resizable(false).show(ctx, |ui| {
+            ui.label("Apariencia:");
+            ui.horizontal(|ui| {
+                let mut pref = self.state.theme;
+                ui.selectable_value(&mut pref, ThemePref::System, "Como el sistema");
+                ui.selectable_value(&mut pref, ThemePref::Light, "Clara");
+                ui.selectable_value(&mut pref, ThemePref::Dark, "Oscura");
+                if pref != self.state.theme {
+                    self.state.theme = pref;
+                    self.state.save();
+                    self.sync_theme();
+                }
+            });
+            if self.state.theme == ThemePref::System {
+                let now = match system_theme::is_dark(ctx) {
+                    Some(true) => "El sistema usa el tema oscuro.",
+                    Some(false) => "El sistema usa el tema claro.",
+                    None => "No se pudo saber el tema del sistema: se usa el oscuro.",
+                };
+                ui.label(RichText::new(now).small());
+            }
+            ui.separator();
             ui.label("Token de GitHub (sólo para repos privados):");
             ui.add(egui::TextEdit::singleline(&mut self.token_input).password(true).desired_width(320.0));
             ui.label(RichText::new("Basta un token de sólo lectura (Contents: read). Se guarda en el archivo de estado.").small());
@@ -595,17 +712,6 @@ impl LauncherApp {
                 self.state.save();
                 self.refresh_releases();
             }
-            ui.separator();
-            if ui
-                .checkbox(
-                    &mut self.state.auto_update,
-                    "Actualizar Iurefficient Apps automáticamente",
-                )
-                .changed()
-            {
-                self.state.save();
-            }
-            ui.label(RichText::new("Si la instalación no pide contraseña, la versión nueva se descarga y se instala sola; se usa al reiniciar.").small());
             ui.separator();
             ui.label(format!("Datos del lanzador: {}", crate::util::data_dir().display()));
             if ui.button("Restablecer variantes y formatos elegidos").clicked() {

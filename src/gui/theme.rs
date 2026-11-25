@@ -5,21 +5,101 @@ use eframe::egui::{
     Painter, Rect, Shape, Stroke, TextureHandle, TextureOptions,
 };
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
-pub const BG: Color32 = Color32::from_rgb(12, 14, 19);
-pub const SURFACE: Color32 = Color32::from_rgb(17, 20, 27);
-pub const SURFACE_HI: Color32 = Color32::from_rgb(24, 28, 37);
-pub const LINE: Color32 = Color32::from_rgb(38, 43, 54);
-pub const TEXT: Color32 = Color32::from_rgb(232, 234, 239);
-pub const MUTED: Color32 = Color32::from_rgb(140, 147, 160);
-pub const FAINT: Color32 = Color32::from_rgb(92, 99, 112);
-pub const BRAND: Color32 = Color32::from_rgb(6, 80, 236);
-pub const BRAND_NAVY: Color32 = Color32::from_rgb(17, 40, 76);
-pub const OK: Color32 = Color32::from_rgb(52, 199, 120);
-pub const WARN: Color32 = Color32::from_rgb(245, 166, 35);
-pub const INFO: Color32 = Color32::from_rgb(96, 150, 255);
-pub const ERROR: Color32 = Color32::from_rgb(240, 90, 90);
+/// Colores de la interfaz para un tema (claro u oscuro).
+#[derive(Clone, Copy)]
+pub struct Palette {
+    pub bg: Color32,
+    pub surface: Color32,
+    pub surface_hi: Color32,
+    pub line: Color32,
+    pub text: Color32,
+    pub muted: Color32,
+    pub faint: Color32,
+    pub brand: Color32,
+    pub brand_navy: Color32,
+    pub ok: Color32,
+    pub warn: Color32,
+    pub info: Color32,
+    pub error: Color32,
+    /// Fondo del aviso de versión nueva.
+    pub banner: Color32,
+    /// Campos de texto.
+    pub field: Color32,
+    pub hover: Color32,
+    pub hover_line: Color32,
+    pub active: Color32,
+}
+
+pub const DARK: Palette = Palette {
+    bg: Color32::from_rgb(12, 14, 19),
+    surface: Color32::from_rgb(17, 20, 27),
+    surface_hi: Color32::from_rgb(24, 28, 37),
+    line: Color32::from_rgb(38, 43, 54),
+    text: Color32::from_rgb(232, 234, 239),
+    muted: Color32::from_rgb(140, 147, 160),
+    faint: Color32::from_rgb(92, 99, 112),
+    brand: Color32::from_rgb(6, 80, 236),
+    brand_navy: Color32::from_rgb(17, 40, 76),
+    ok: Color32::from_rgb(52, 199, 120),
+    warn: Color32::from_rgb(245, 166, 35),
+    info: Color32::from_rgb(96, 150, 255),
+    error: Color32::from_rgb(240, 90, 90),
+    banner: Color32::from_rgb(14, 22, 40),
+    field: Color32::from_rgb(9, 11, 15),
+    hover: Color32::from_rgb(32, 37, 48),
+    hover_line: Color32::from_rgb(70, 78, 94),
+    active: Color32::from_rgb(40, 46, 60),
+};
+
+/// Tema claro: los colores de estado, más oscuros, para que se lean sobre blanco.
+pub const LIGHT: Palette = Palette {
+    bg: Color32::from_rgb(246, 247, 249),
+    surface: Color32::from_rgb(255, 255, 255),
+    surface_hi: Color32::from_rgb(234, 237, 242),
+    line: Color32::from_rgb(218, 222, 230),
+    text: Color32::from_rgb(22, 25, 32),
+    muted: Color32::from_rgb(88, 95, 108),
+    faint: Color32::from_rgb(132, 139, 152),
+    brand: Color32::from_rgb(6, 80, 236),
+    brand_navy: Color32::from_rgb(17, 40, 76),
+    ok: Color32::from_rgb(22, 138, 78),
+    warn: Color32::from_rgb(178, 104, 0),
+    info: Color32::from_rgb(28, 98, 222),
+    error: Color32::from_rgb(200, 48, 48),
+    banner: Color32::from_rgb(232, 239, 253),
+    field: Color32::from_rgb(255, 255, 255),
+    hover: Color32::from_rgb(226, 230, 237),
+    hover_line: Color32::from_rgb(170, 177, 190),
+    active: Color32::from_rgb(214, 219, 228),
+};
+
+static DARK_MODE: AtomicBool = AtomicBool::new(true);
+
+/// Paleta del tema en uso.
+pub fn pal() -> &'static Palette {
+    if is_dark() {
+        &DARK
+    } else {
+        &LIGHT
+    }
+}
+
+pub fn is_dark() -> bool {
+    DARK_MODE.load(Ordering::Relaxed)
+}
+
+/// Cambia al tema claro u oscuro (paleta y visuales de egui).
+pub fn apply(ctx: &egui::Context, dark: bool) {
+    DARK_MODE.store(dark, Ordering::Relaxed);
+    ctx.set_theme(if dark {
+        egui::Theme::Dark
+    } else {
+        egui::Theme::Light
+    });
+}
 
 pub fn accent(rgb: [u8; 3]) -> Color32 {
     Color32::from_rgb(rgb[0], rgb[1], rgb[2])
@@ -79,38 +159,9 @@ pub fn install(ctx: &egui::Context) {
     fonts.families.insert(FontFamily::Monospace, with("jbmono"));
     ctx.set_fonts(fonts);
 
-    let mut v = egui::Visuals::dark();
-    v.panel_fill = BG;
-    v.window_fill = SURFACE;
-    v.window_stroke = Stroke::new(1.0, LINE);
-    v.window_corner_radius = CornerRadius::same(4);
-    v.menu_corner_radius = CornerRadius::same(4);
-    v.extreme_bg_color = Color32::from_rgb(9, 11, 15);
-    v.faint_bg_color = SURFACE;
-    v.hyperlink_color = TEXT;
-    v.selection.bg_fill = BRAND;
-    v.override_text_color = None;
-    let r = CornerRadius::same(2);
-    for w in [
-        &mut v.widgets.noninteractive,
-        &mut v.widgets.inactive,
-        &mut v.widgets.hovered,
-        &mut v.widgets.active,
-        &mut v.widgets.open,
-    ] {
-        w.corner_radius = r;
-    }
-    v.widgets.noninteractive.bg_stroke = Stroke::new(1.0, LINE);
-    v.widgets.noninteractive.fg_stroke = Stroke::new(1.0, MUTED);
-    v.widgets.inactive.weak_bg_fill = SURFACE_HI;
-    v.widgets.inactive.bg_fill = SURFACE_HI;
-    v.widgets.inactive.bg_stroke = Stroke::new(1.0, LINE);
-    v.widgets.inactive.fg_stroke = Stroke::new(1.0, TEXT);
-    v.widgets.hovered.weak_bg_fill = Color32::from_rgb(32, 37, 48);
-    v.widgets.hovered.bg_stroke = Stroke::new(1.0, Color32::from_rgb(70, 78, 94));
-    v.widgets.active.weak_bg_fill = Color32::from_rgb(40, 46, 60);
-    ctx.set_visuals_of(egui::Theme::Dark, v);
-    ctx.set_theme(egui::Theme::Dark);
+    ctx.set_visuals_of(egui::Theme::Dark, visuals(&DARK, true));
+    ctx.set_visuals_of(egui::Theme::Light, visuals(&LIGHT, false));
+    apply(ctx, true);
     ctx.all_styles_mut(|s| {
         s.spacing.button_padding = vec2(10.0, 5.0);
         s.spacing.item_spacing = vec2(8.0, 6.0);
@@ -123,11 +174,55 @@ pub fn install(ctx: &egui::Context) {
     });
 }
 
+fn visuals(p: &Palette, dark: bool) -> egui::Visuals {
+    let mut v = if dark {
+        egui::Visuals::dark()
+    } else {
+        egui::Visuals::light()
+    };
+    v.panel_fill = p.bg;
+    v.window_fill = p.surface;
+    v.window_stroke = Stroke::new(1.0, p.line);
+    v.window_corner_radius = CornerRadius::same(4);
+    v.menu_corner_radius = CornerRadius::same(4);
+    v.extreme_bg_color = p.field;
+    v.faint_bg_color = p.surface;
+    v.hyperlink_color = p.text;
+    v.selection.bg_fill = p.brand;
+    v.selection.stroke = Stroke::new(1.0, Color32::WHITE);
+    v.override_text_color = None;
+    let r = CornerRadius::same(2);
+    for w in [
+        &mut v.widgets.noninteractive,
+        &mut v.widgets.inactive,
+        &mut v.widgets.hovered,
+        &mut v.widgets.active,
+        &mut v.widgets.open,
+    ] {
+        w.corner_radius = r;
+    }
+    v.widgets.noninteractive.bg_stroke = Stroke::new(1.0, p.line);
+    v.widgets.noninteractive.fg_stroke = Stroke::new(1.0, p.muted);
+    v.widgets.inactive.weak_bg_fill = p.surface_hi;
+    v.widgets.inactive.bg_fill = p.surface_hi;
+    v.widgets.inactive.bg_stroke = Stroke::new(1.0, p.line);
+    v.widgets.inactive.fg_stroke = Stroke::new(1.0, p.text);
+    v.widgets.hovered.weak_bg_fill = p.hover;
+    v.widgets.hovered.bg_stroke = Stroke::new(1.0, p.hover_line);
+    v.widgets.hovered.fg_stroke = Stroke::new(1.0, p.text);
+    v.widgets.active.weak_bg_fill = p.active;
+    v.widgets.active.fg_stroke = Stroke::new(1.0, p.text);
+    v.widgets.open.weak_bg_fill = p.active;
+    v
+}
+
 /// Iconos de las apps que publican uno (el resto se dibuja con [`paint_drawn_icon`]) y la
 /// marca de Iurefficient (icono y logotipo, rasterizados de `assets/brand` por `build.rs`).
 pub struct Icons {
     textures: HashMap<&'static str, TextureHandle>,
+    /// Logotipo con letras claras (tema oscuro) y con letras oscuras (tema claro).
     logo: Option<TextureHandle>,
+    logo_light: Option<TextureHandle>,
 }
 
 /// Con mipmaps: la marca se dibuja bastante más pequeña que su PNG y así no se ve dentada.
@@ -167,7 +262,16 @@ impl Icons {
             .collect();
         let logo = decode_png(include_bytes!(concat!(env!("OUT_DIR"), "/logotipo.png")))
             .map(|img| ctx.load_texture("logotipo", img, SHARP_DOWNSCALE));
-        Icons { textures, logo }
+        let logo_light = decode_png(include_bytes!(concat!(
+            env!("OUT_DIR"),
+            "/logotipo-claro.png"
+        )))
+        .map(|img| ctx.load_texture("logotipo-claro", img, SHARP_DOWNSCALE));
+        Icons {
+            textures,
+            logo,
+            logo_light,
+        }
     }
 
     pub fn paint(&self, painter: &Painter, rect: Rect, app_id: &str, accent: Color32) {
@@ -176,7 +280,7 @@ impl Icons {
             // El icono de Iurefficient es sólo el trazo: va sobre el fondo de la suite.
             Some(t) if app_id == "iurefficient" => {
                 let s = rect.width();
-                painter.rect_filled(rect, CornerRadius::same((s * 0.22) as u8), BRAND_NAVY);
+                painter.rect_filled(rect, CornerRadius::same((s * 0.22) as u8), pal().brand_navy);
                 painter.image(t.id(), rect.shrink(s * 0.2), uv, Color32::WHITE);
             }
             Some(t) => {
@@ -186,9 +290,19 @@ impl Icons {
         }
     }
 
+    /// Textura del icono de `app_id`, si la app publica uno.
+    pub fn texture(&self, app_id: &str) -> Option<&TextureHandle> {
+        self.textures.get(app_id)
+    }
+
     /// Logotipo de Iurefficient de `height` puntos de alto (el texto «Iurefficient» si faltara).
     pub fn logo(&self, ui: &mut egui::Ui, height: f32) -> egui::Response {
-        match &self.logo {
+        let logo = if is_dark() {
+            &self.logo
+        } else {
+            &self.logo_light
+        };
+        match logo {
             Some(t) => {
                 let [w, h] = t.size();
                 let size = vec2(height * w as f32 / h as f32, height);
@@ -211,6 +325,12 @@ pub fn window_icon() -> Option<egui::IconData> {
         width: img.size[0] as u32,
         height: img.size[1] as u32,
     })
+}
+
+/// Decodifica una captura de pantalla (PNG); `None` si no lo es o es desmesurada.
+pub fn decode_shot(bytes: &[u8]) -> Option<egui::ColorImage> {
+    let img = decode_png(bytes)?;
+    (img.size[0] <= 4096 && img.size[1] <= 4096 && img.size[0] * img.size[1] > 0).then_some(img)
 }
 
 fn decode_png(bytes: &[u8]) -> Option<egui::ColorImage> {
@@ -241,7 +361,7 @@ fn decode_png(bytes: &[u8]) -> Option<egui::ColorImage> {
 /// símbolo propio, para las apps que todavía no publican icono.
 pub fn paint_drawn_icon(painter: &Painter, rect: Rect, app_id: &str, accent: Color32) {
     let s = rect.width();
-    painter.rect_filled(rect, CornerRadius::same((s * 0.22) as u8), BRAND_NAVY);
+    painter.rect_filled(rect, CornerRadius::same((s * 0.22) as u8), pal().brand_navy);
     // Semicírculo superior (la «cúpula» del logotipo).
     let c = pos2(rect.center().x, rect.top() + s * 0.12);
     let r = s * 0.26;
@@ -251,7 +371,7 @@ pub fn paint_drawn_icon(painter: &Painter, rect: Rect, app_id: &str, accent: Col
             pos2(c.x + r * a.cos(), c.y + r * a.sin())
         })
         .collect();
-    painter.add(Shape::convex_polygon(points, BRAND, Stroke::NONE));
+    painter.add(Shape::convex_polygon(points, pal().brand, Stroke::NONE));
 
     let white = Color32::from_rgb(246, 246, 248);
     let base = rect.top() + s * 0.52;

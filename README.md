@@ -4,9 +4,15 @@ Lanzador e instalador ligero, en Rust, de las apps de escritorio de
 [Iurefficient](https://iurefficient.com): **iureditor, IureTranscribe, IureOCR, IureDav,
 IureVoz, IureDesk e IureProject**. Un solo ejecutable (~7 MB) para Linux, Windows y macOS.
 
-La ventana muestra las apps en **mosaico** (o en tabla): icono, nombre con el color de cada
-app, estado, versión, aceleración elegida y la acción principal (instalar, actualizar o
-abrir), con filtros (todas, instaladas, actualizaciones, no instaladas) y búsqueda.
+La ventana muestra las apps en **mosaico** (o en tabla), como el cajón de apps de GNOME:
+icono, nombre y un distintivo de estado en la esquina del icono (✓ instalada, ↑ actualización,
+↓ disponible, ⊘ no disponible, con el icono atenuado), con filtros (todas, instaladas,
+actualizaciones, no instaladas) y búsqueda. Un clic abre la **ficha** de la app: portada con su
+color, la acción principal (Abrir en verde, Instalar en azul, Actualizar en ámbar),
+Desinstalar, aceleración y formato, capturas de pantalla (un clic las amplía), versión
+instalada y última, tamaño del instalador y novedades. Esc o «‹ Todas las apps» vuelve al
+mosaico; el clic derecho en un icono ofrece la acción principal y Desinstalar sin abrir la
+ficha.
 
 Qué hace:
 
@@ -28,6 +34,16 @@ Qué hace:
   equipo si no hay ninguna y deja la cuenta como «cuenta activa». IureDav, IureTranscribe,
   IureOCR e iureditor la toman al abrirse si no tienen otra configurada. «Abrir
   Iurefficient» abre la instancia en el navegador.
+- **Se actualiza solo**: cuando hay una versión nueva del lanzador, «Actualizar y reiniciar»
+  baja el archivo que corresponde a cómo está instalado (`.deb`/`.rpm` con `pkexec`, el
+  ejecutable suelto, el `.exe` de Windows o el `.dmg` de macOS), comprueba su firma, se
+  reemplaza y vuelve a abrirse. Si la release no está firmada o no hay versión para el equipo,
+  ofrece descargarla a mano. También `iureapps actualizar-lanzador`.
+- **Tema claro u oscuro**: sigue al del sistema (en Linux lo lee del portal del escritorio,
+  del tema GTK de GNOME o del esquema de KDE, y cambia en vivo si cambias el del sistema; en
+  Windows y macOS, el que informa la ventana). En *Ajustes → Apariencia* se puede fijar
+  «Clara» u «Oscura».
+- **Una sola ventana**: si ya está abierto, volver a abrirlo trae al frente la ventana existente.
 - **Verifica la firma minisign** (`.sig`) de cada instalador con la clave pública del
   actualizador de cada app antes de instalarlo; las apps que no firman (IureDesk) se
   comprueban contra el `SHA256SUMS` de su release.
@@ -40,7 +56,7 @@ Qué hace:
 | Linux | `.tar.gz` con los binarios (IureProject) | `~/.local/share/iureapps/apps/<app>/` + entrada en el menú |
 | Linux | `.deb` / `.rpm` (CUDA, IureVoz, o si no hay FUSE) | `pkexec apt-get install` / `dnf install` |
 | Windows | instalador `.exe` en modo silencioso: NSIS (`/S`) o Inno Setup en IureVoz (`/VERYSILENT`) | lo que defina cada app (IureDav pide administrador; IureVoz, sólo el usuario) |
-| macOS | `.app.tar.gz` (o `.dmg` en IureDesk) | `/Applications` o `~/Applications`, sin cuarentena |
+| macOS | `.app.tar.gz` (IureVoz, apps Tauri) o `.dmg` (IureDesk) | `/Applications` o `~/Applications`, sin cuarentena |
 
 Sin `libfuse2` los AppImage se ejecutan con `APPIMAGE_EXTRACT_AND_RUN=1`.
 
@@ -58,7 +74,7 @@ iureapps conectar 2.ds.iurefficient.com yo@despacho.com   # pide contraseña (y 
 iureapps cuenta               # estado de la cuenta compartida
 iureapps iurefficient         # abre la instancia en el navegador
 iureapps desconectar
-iureapps autoactualizar       # instala la versión nueva del propio lanzador
+iureapps actualizar-lanzador # instala la última versión de iureapps
 ```
 
 IureDesk publica sus instaladores (firmados con minisign) en su propio repo,
@@ -66,6 +82,43 @@ IureDesk publica sus instaladores (firmados con minisign) en su propio repo,
 `ellaguno/iureproject-releases`. Para repos privados, configura un token de GitHub de
 sólo lectura en *Ajustes* o con la variable `IUREAPPS_GITHUB_TOKEN`. El token también sube
 el límite de la API de 60 a 5000 consultas por hora.
+
+## Firma de las releases
+
+Cada archivo de la release lleva su `.sig`, firmado con la misma clave del actualizador de Tauri
+que iureditor, IureTranscribe e IureDav (clave pública `8F1B48E168561525`). Los workflows la
+toman de los secrets `TAURI_SIGNING_PRIVATE_KEY` y `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`
+(los mismos valores que en esos repos). Sin ellos la release se publica igual, sin `.sig`, y el
+lanzador no se actualiza solo: ofrece la descarga.
+
+## Capturas de cada app
+
+La ficha muestra las capturas que cada app guarda en una carpeta fija de su repo (el de sus
+releases), en la rama por defecto:
+
+```text
+docs/screenshots/1.png
+docs/screenshots/2.png         … hasta 6, numeradas en orden y sin saltos
+docs/screenshots/captions.txt  opcional: un pie de foto por línea, en el mismo orden
+```
+
+Basta con subir las imágenes ahí; no hace falta tocar el lanzador. Sólo PNG, de 8 MB y 4096 px
+por lado como mucho. Se leen de `raw.githubusercontent.com` (sin gastar consultas de la API)
+al abrir la ficha, una vez por sesión o al pulsar *Comprobar*, y se guardan en
+`<datos>/shots/<app>/` para verlas sin conexión.
+
+| App | Carpeta |
+| --- | --- |
+| iureditor | `ellaguno/iureditor` → `docs/screenshots/` |
+| IureTranscribe | `ellaguno/iuretranscribe` → `docs/screenshots/` |
+| IureOCR | `ellaguno/iureocr` → `docs/screenshots/` |
+| IureDav | `ellaguno/iuredav` → `docs/screenshots/` |
+| IureVoz | `ellaguno/iurevoz` → `docs/screenshots/` |
+| IureDesk | `ellaguno/iuredesk` → `docs/screenshots/` |
+| IureProject | `ellaguno/iureproject-releases` → `docs/screenshots/` |
+
+Las novedades de cada versión (el texto de la release en GitHub) se muestran con su formato
+Markdown: títulos, listas, negrita, código, citas y enlaces.
 
 ## Recursos
 
@@ -105,35 +158,29 @@ Al subir una etiqueta `vX.Y.Z`, o al lanzar `build.yml` a mano con la entrada `r
 | `iureapps_X.Y.Z-1_amd64.deb` | Debian, Ubuntu y derivadas (`sudo apt install ./iureapps_…deb`) |
 | `iureapps-X.Y.Z-1.x86_64.rpm` | Fedora, openSUSE y derivadas (`sudo dnf install ./iureapps-…rpm`) |
 | `iureapps-linux-x64.tar.gz` | cualquier Linux x64 (binario suelto) |
-| `iureapps-windows-x64-setup.exe` | Windows: instalador para el usuario (sin administrador, en `%LOCALAPPDATA%\Programs`) |
-| `iureapps-windows-x64.msi` | Windows: instalador para todos los usuarios (Archivos de programa; despliegue por GPO/Intune) |
-| `iureapps-windows-x64.exe` | Windows: ejecutable suelto, sin instalar |
-| `iureapps-macos-arm64.tar.gz`, `iureapps-macos-x64.tar.gz` | macOS (Apple Silicon e Intel) |
-| `SHA256SUMS` (y `*.sig` si hay clave) | verificación de la autoactualización |
+| `iureapps-windows-x64.exe` | Windows |
+| `iureapps-macos-universal.dmg` | macOS (Apple Silicon e Intel), firmado y notarizado |
+| `iureapps-macos-arm64.tar.gz`, `iureapps-macos-x64.tar.gz` | macOS, binario suelto sin firmar |
 
-Los paquetes instalan el binario en `/usr/bin`, la entrada del menú y el icono. En macOS el
-binario no está firmado: la primera vez, clic derecho → Abrir (o
-`xattr -d com.apple.quarantine iureapps`). El icono se regenera con `python3 scripts/icono.py`.
+Los paquetes instalan el binario en `/usr/bin`, la entrada del menú y el icono. En macOS,
+el `.dmg` trae `Iurefficient Apps.app` (`com.sesolibre.iureapps`), universal, firmada con
+Developer ID y notarizada: se arrastra a Aplicaciones y abre sin avisos. Los `.tar.gz` de
+macOS no están firmados: la primera vez, clic derecho → Abrir (o
+`xattr -d com.apple.quarantine iureapps`).
 
-### Autoactualización
+### Firma de macOS
 
-Al abrirse, el lanzador consulta su propio release. Si hay una versión más nueva:
+`.github/workflows/macos.yml` arma el `.app` (plantilla `assets/macos/Info.plist`; versión de
+`Cargo.toml` y build = número de ejecución), lo firma con hardened runtime, lo mete en un
+`.dmg` firmado, lo notariza con `notarytool` y la llave de App Store Connect (un solo envío,
+que cubre la app) y lo engrapa. Si Apple tarda, el workflow «Estado de notarización» consulta
+los envíos desde Linux. Los secrets se cargan una sola vez desde la máquina con los
+certificados (usa `apple_devid.key` y su `.cer`, o `devid.p12`):
 
-| Instalado con | Cómo se actualiza |
-| --- | --- |
-| `-setup.exe`, `.tar.gz` o ejecutable suelto en una carpeta del usuario | baja el binario, lo verifica y reemplaza el que está corriendo, **solo** (se puede desactivar en *Ajustes*); «Reiniciar» abre la versión nueva |
-| `.msi` (Archivos de programa) | con «Actualizar» baja el `.msi` y lanza `msiexec` (pide elevación); el lanzador se cierra y se vuelve a abrir al terminar |
-| `.deb` / `.rpm` | con «Actualizar» instala el paquete nuevo con pkexec |
-
-Cada descarga se comprueba contra `SHA256SUMS`. Para exigir además firma minisign: generar
-una clave con `npx @tauri-apps/cli signer generate -w iureapps.key`, guardar la privada y su
-contraseña en los secretos `IUREAPPS_SIGNING_KEY` e `IUREAPPS_SIGNING_KEY_PASSWORD` del repo,
-y poner la pública (`iureapps.key.pub`) en `PUBKEY` de `src/selfupdate.rs`. Desde esa versión,
-la firma `.sig` es obligatoria.
-
-Los instaladores de Windows salen de `assets/windows/` (`iureapps.wxs` con WiX 5,
-`iureapps.nsi` con NSIS); ninguno está firmado con Authenticode, así que SmartScreen avisa
-la primera vez.
+```bash
+scripts/apple-secrets.sh ~/apple-certs
+```
+ El icono (PNG y el `.icns` de macOS) se regenera con `python3 scripts/icono.py`. El lanzador avisa cuando hay una versión suya más nueva.
 
 ## Agregar una app
 
@@ -150,6 +197,7 @@ Si sigue el esquema de nombres de los instaladores Tauri de la suite
   dibuja aquí, es ya el ícono de la app).
 - Cuenta: elegir entre varias cuentas o instancias, y ver o revocar las contraseñas WebDAV y
   los tokens MCP del equipo.
+- Autoactualización del lanzador (hoy sólo avisa y enlaza la descarga).
 - Comprobar requisitos por app: Tesseract/idiomas de IureOCR, rclone/WinFsp/macFUSE de
   IureDav, GNOME en Wayland de IureVoz.
 - Modelos de Whisper: ver los instalados y descargar el adecuado según RAM/VRAM.

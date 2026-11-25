@@ -7,8 +7,10 @@ mod connect;
 mod github;
 mod gui;
 mod installer;
+mod instance;
 mod plan;
 mod selfupdate;
+mod shots;
 mod state;
 mod system;
 mod util;
@@ -16,6 +18,7 @@ mod verify;
 
 fn main() {
     connect::init();
+    selfupdate::cleanup();
     // Entradas del menú de versiones anteriores sin icono ni clase de ventana (engrane en GNOME).
     std::thread::spawn(installer::repair_desktop_entries);
     let args: Vec<String> = std::env::args().skip(1).collect();

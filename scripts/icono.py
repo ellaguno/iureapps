@@ -2,7 +2,9 @@
 
 Fondo azul marino, la cúpula azul de Iurefficient y un mosaico de 2×2 (las apps).
 Uso: python3 scripts/icono.py assets/iureapps.png
+Además escribe assets/macos/iureapps.icns (16–1024 px) para el .app de macOS.
 """
+import os
 import sys
 from PIL import Image, ImageDraw
 
@@ -33,3 +35,7 @@ for k, accent in enumerate(ACCENTS):
 out = sys.argv[1] if len(sys.argv) > 1 else "assets/iureapps.png"
 img.resize((256, 256), Image.LANCZOS).save(out, optimize=True)
 print(out)
+icns = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "assets", "macos", "iureapps.icns")
+os.makedirs(os.path.dirname(icns), exist_ok=True)
+img.save(icns, sizes=[16, 32, 64, 128, 256, 512, 1024])
+print(os.path.normpath(icns))

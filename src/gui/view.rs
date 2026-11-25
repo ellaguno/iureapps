@@ -1,21 +1,117 @@
 //! Dibujo de la ventana: cabecera, filtros, mosaico (o tabla) y barra de estado.
 
-use super::theme::{self, BG, BRAND, ERROR, FAINT, INFO, LINE, MUTED, OK, SURFACE, TEXT, WARN};
-use super::{Filter, LauncherApp, ViewMode};
+use super::theme::{self, pal};
+use super::{Filter, LauncherApp, Selected, ViewMode};
 use crate::catalog::{AppDef, Format, APPS};
 use crate::plan::{self, Status};
 use crate::system::{Os, SystemInfo};
 use eframe::egui::{
-    self, pos2, text::LayoutJob, vec2, Align, Align2, Color32, CornerRadius, FontId, Layout, Rect,
-    RichText, Sense, Stroke, StrokeKind, TextFormat, Ui, UiBuilder,
+    self, pos2, text::LayoutJob, vec2, Align, Color32, CornerRadius, FontId, Layout, Rect,
+    RichText, Sense, Stroke, StrokeKind, TextFormat, Ui,
 };
 
-const TILE_MIN_W: f32 = 330.0;
-const TILE_H: f32 = 292.0;
-const PAD: f32 = 20.0;
+const CELL_W: f32 = 136.0;
+const CELL_H: f32 = 156.0;
+const CELL_ICON: f32 = 72.0;
+
+/// Distintivo de estado en la esquina del icono.
+#[derive(Clone, Copy)]
+pub(super) enum Badge {
+    /// Instalada (✓ verde).
+    Ok,
+    /// Actualización (↑ ámbar).
+    Update,
+    /// Disponible para instalar (↓ azul).
+    Get,
+    /// No disponible (⊘ gris).
+    No,
+    /// Hay que atender algo (! ámbar).
+    Warn,
+}
+
+/// Lo que pinta una celda del mosaico.
+struct Cell {
+    icon_id: &'static str,
+    accent: Color32,
+    name: LayoutJob,
+    /// Texto bajo el nombre y su color (estado o para qué sirve la app).
+    line: (String, Color32),
+    badge: Option<Badge>,
+    /// Icono atenuado: no se puede instalar.
+    dim: bool,
+    /// Barra de avance en lugar del texto, mientras instala.
+    progress: Option<f32>,
+}
+
+/// Acción principal de una app.
+#[derive(Clone, Copy)]
+pub(super) enum Action {
+    Open,
+    Install,
+    Update,
+}
+
+/// Círculo de color con un glifo dibujado (no depende de que la fuente lo tenga) y un aro
+/// del color de fondo para separarlo del icono.
+pub(super) fn paint_badge(
+    painter: &egui::Painter,
+    c: egui::Pos2,
+    r: f32,
+    badge: Badge,
+    bg: Color32,
+) {
+    let fill = match badge {
+        Badge::Ok => pal().ok,
+        Badge::Update | Badge::Warn => pal().warn,
+        Badge::Get => pal().info,
+        Badge::No => pal().faint,
+    };
+    painter.circle(c, r, fill, Stroke::new(r * 0.24, bg));
+    let s = Stroke::new((r * 0.18).max(1.6), Color32::WHITE);
+    let k = r * 0.45;
+    match badge {
+        Badge::Ok => {
+            painter.line(
+                vec![
+                    c + vec2(-k, 0.0),
+                    c + vec2(-k * 0.3, k * 0.7),
+                    c + vec2(k, -k * 0.6),
+                ],
+                s,
+            );
+        }
+        Badge::Update | Badge::Get => {
+            let dir = if matches!(badge, Badge::Update) {
+                -1.0
+            } else {
+                1.0
+            };
+            painter.line_segment([c + vec2(0.0, -k * dir), c + vec2(0.0, k * dir)], s);
+            painter.line(
+                vec![
+                    c + vec2(-k * 0.75, k * 0.1 * dir),
+                    c + vec2(0.0, k * dir),
+                    c + vec2(k * 0.75, k * 0.1 * dir),
+                ],
+                s,
+            );
+        }
+        Badge::No => {
+            painter.circle_stroke(c, k, s);
+            painter.line_segment(
+                [c + vec2(-k * 0.7, k * 0.7), c + vec2(k * 0.7, -k * 0.7)],
+                s,
+            );
+        }
+        Badge::Warn => {
+            painter.line_segment([c + vec2(0.0, -k), c + vec2(0.0, k * 0.25)], s);
+            painter.circle_filled(c + vec2(0.0, k * 0.8), s.width * 0.6, Color32::WHITE);
+        }
+    }
+}
 
 /// Texto en mayúsculas con espaciado, al estilo de las etiquetas de la interfaz.
-fn caps(text: &str, size: f32, color: Color32) -> LayoutJob {
+pub(super) fn caps(text: &str, size: f32, color: Color32) -> LayoutJob {
     let mut job = LayoutJob::default();
     job.append(
         &text.to_uppercase(),
@@ -30,13 +126,13 @@ fn caps(text: &str, size: f32, color: Color32) -> LayoutJob {
     job
 }
 
-fn caps_label(ui: &mut Ui, text: &str, size: f32, color: Color32) -> egui::Response {
+pub(super) fn caps_label(ui: &mut Ui, text: &str, size: f32, color: Color32) -> egui::Response {
     ui.label(caps(text, size, color))
 }
 
 /// Botón pintado a mano: a diferencia de `egui::Button` con `fill`, conserva el cambio al
 /// pasar el ratón y al pulsar (se oscurece y se hunde 1 px), con cursor de mano.
-fn press_button(
+pub(super) fn press_button(
     ui: &mut Ui,
     job: LayoutJob,
     fill: Color32,
@@ -67,7 +163,7 @@ fn press_button(
             } else {
                 0.0
             };
-            (fill.lerp_to_gamma(BG, t), stroke.color)
+            (fill.lerp_to_gamma(pal().bg, t), stroke.color)
         };
         let r = if pressed {
             rect.translate(vec2(0.0, 1.0)).shrink(0.5)
@@ -83,7 +179,7 @@ fn press_button(
             StrokeKind::Inside,
         );
         ui.painter()
-            .galley(r.center() - galley.size() / 2.0, galley, TEXT);
+            .galley(r.center() - galley.size() / 2.0, galley, pal().text);
     }
     if ui.is_enabled() {
         resp.on_hover_cursor(egui::CursorIcon::PointingHand)
@@ -93,8 +189,13 @@ fn press_button(
 }
 
 /// Botón plano con texto en mayúsculas; `fill` da el botón principal (fondo claro).
-fn flat_button(ui: &mut Ui, text: &str, fill: Option<Color32>, min: egui::Vec2) -> egui::Response {
-    let fg = if fill.is_some() { BG } else { TEXT };
+pub(super) fn flat_button(
+    ui: &mut Ui,
+    text: &str,
+    fill: Option<Color32>,
+    min: egui::Vec2,
+) -> egui::Response {
+    let fg = if fill.is_some() { pal().bg } else { pal().text };
     let radius = ui.visuals().widgets.inactive.corner_radius;
     match fill {
         Some(f) => press_button(ui, caps(text, 11.5, fg), f, Stroke::NONE, radius, min),
@@ -102,7 +203,7 @@ fn flat_button(ui: &mut Ui, text: &str, fill: Option<Color32>, min: egui::Vec2) 
             ui,
             caps(text, 11.5, fg),
             Color32::TRANSPARENT,
-            Stroke::new(1.0, LINE),
+            Stroke::new(1.0, pal().line),
             radius,
             min,
         ),
@@ -116,15 +217,15 @@ fn segmented(ui: &mut Ui, items: &[(String, bool)]) -> Option<usize> {
         ui.spacing_mut().item_spacing.x = 0.0;
         for (k, (label, selected)) in items.iter().enumerate() {
             let (fg, fill) = if *selected {
-                (BG, TEXT)
+                (pal().bg, pal().text)
             } else {
-                (MUTED, Color32::TRANSPARENT)
+                (pal().muted, Color32::TRANSPARENT)
             };
             let b = press_button(
                 ui,
                 caps(label, 11.0, fg),
                 fill,
-                Stroke::new(1.0, LINE),
+                Stroke::new(1.0, pal().line),
                 CornerRadius::ZERO,
                 vec2(0.0, 30.0),
             );
@@ -137,7 +238,7 @@ fn segmented(ui: &mut Ui, items: &[(String, bool)]) -> Option<usize> {
 }
 
 /// «2026-10-21» → «21 oct 2026».
-fn nice_date(iso: &str) -> String {
+pub(super) fn nice_date(iso: &str) -> String {
     const M: [&str; 12] = [
         "ene", "feb", "mar", "abr", "may", "jun", "jul", "ago", "sep", "oct", "nov", "dic",
     ];
@@ -155,7 +256,7 @@ fn nice_date(iso: &str) -> String {
 }
 
 /// Nombre a dos tonos: «Iure» en blanco y el resto en el color de la app.
-fn two_tone(name: &str, size: f32, accent: Color32) -> LayoutJob {
+pub(super) fn two_tone(name: &str, size: f32, accent: Color32) -> LayoutJob {
     let split = name
         .char_indices()
         .nth(4)
@@ -167,29 +268,20 @@ fn two_tone(name: &str, size: f32, accent: Color32) -> LayoutJob {
         color,
         ..Default::default()
     };
-    job.append(&name[..split], 0.0, fmt(TEXT));
+    job.append(&name[..split], 0.0, fmt(pal().text));
     job.append(&name[split..], 0.0, fmt(accent));
     job
 }
 
-fn status_style(status: &Status) -> (Color32, &'static str) {
+pub(super) fn status_style(status: &Status) -> (Color32, &'static str) {
     match status {
-        Status::NotInstalled => (INFO, "Disponible para instalar"),
-        Status::UpToDate | Status::InstalledUnknown => (OK, "Instalada"),
-        Status::UpdateAvailable => (WARN, "Actualización disponible"),
-        Status::Checking => (MUTED, "Consultando…"),
-        Status::Unavailable => (FAINT, "Sin versión publicada"),
-        Status::Unsupported => (FAINT, "No disponible en este sistema"),
+        Status::NotInstalled => (pal().info, "Disponible para instalar"),
+        Status::UpToDate | Status::InstalledUnknown => (pal().ok, "Instalada"),
+        Status::UpdateAvailable => (pal().warn, "Actualización disponible"),
+        Status::Checking => (pal().muted, "Consultando…"),
+        Status::Unavailable => (pal().faint, "Sin versión publicada"),
+        Status::Unsupported => (pal().faint, "No disponible en este sistema"),
     }
-}
-
-fn chip(ui: &mut Ui, text: &str, color: Color32) {
-    egui::Frame::new()
-        .stroke(Stroke::new(1.0, color.gamma_multiply(0.7)))
-        .inner_margin(egui::Margin::symmetric(6, 3))
-        .show(ui, |ui| {
-            ui.label(caps(text, 10.0, color));
-        });
 }
 
 impl LauncherApp {
@@ -232,14 +324,14 @@ impl LauncherApp {
             ui.add_space(10.0);
             if full {
                 egui::Frame::new()
-                    .fill(TEXT)
+                    .fill(pal().text)
                     .inner_margin(egui::Margin::symmetric(8, 4))
                     .show(ui, |ui| {
-                        ui.label(caps("Lanzador", 10.5, BG));
+                        ui.label(caps("Lanzador", 10.5, pal().bg));
                     });
             }
             if ui.available_width() > 640.0 {
-                caps_label(ui, "Suite de escritorio", 10.5, FAINT);
+                caps_label(ui, "Suite de escritorio", 10.5, pal().faint);
             }
             let wide = ui.available_width() > 600.0;
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
@@ -254,6 +346,7 @@ impl LauncherApp {
                     .clicked()
                 {
                     self.refresh_releases();
+                    self.shots.clear();
                     for i in 0..APPS.len() {
                         self.redetect(i);
                     }
@@ -270,6 +363,7 @@ impl LauncherApp {
                     ],
                 );
                 if let Some(k) = pick {
+                    self.selected = None;
                     self.view = if k == 0 {
                         ViewMode::Table
                     } else {
@@ -283,72 +377,98 @@ impl LauncherApp {
     }
 
     fn update_banner(&mut self, ui: &mut Ui) {
-        if self.update_dismissed {
-            return;
-        }
-        let u = &self.self_update;
-        let Some(r) = u.release.clone() else {
+        let Some(r) = self.self_update.clone().filter(|_| !self.update_dismissed) else {
             return;
         };
-        let (tag, message) = if let Some((_, v)) = &u.ready {
-            (
-                "Listo",
-                format!("Iurefficient Apps {v} ya está instalada; reinicia para usarla."),
-            )
-        } else if let Some(p) = u.progress {
-            (
-                "Nuevo",
-                format!(
-                    "Actualizando Iurefficient Apps a {}… {:.0} %",
-                    r.version(),
-                    p * 100.0
-                ),
-            )
-        } else if let Some(e) = &u.error {
-            (
-                "Error",
-                format!("No se pudo actualizar a {}: {e}", r.version()),
-            )
-        } else {
-            (
-                "Nuevo",
-                format!("Iurefficient Apps {} está disponible.", r.version()),
-            )
-        };
-        let (ready, busy) = (u.ready.is_some(), u.progress.is_some());
         ui.add_space(14.0);
         egui::Frame::new()
-            .fill(Color32::from_rgb(14, 22, 40))
-            .stroke(Stroke::new(1.0, BRAND))
+            .fill(pal().banner)
+            .stroke(Stroke::new(1.0, pal().brand))
             .inner_margin(egui::Margin::symmetric(16, 12))
             .show(ui, |ui| {
                 ui.horizontal(|ui| {
                     egui::Frame::new()
-                        .fill(BRAND)
+                        .fill(pal().brand)
                         .inner_margin(egui::Margin::symmetric(8, 3))
                         .show(ui, |ui| {
-                            ui.label(caps(tag, 10.5, Color32::WHITE));
+                            ui.label(caps("Nuevo", 10.5, Color32::WHITE));
                         });
-                    ui.label(RichText::new(message).color(TEXT));
+                    ui.label(
+                        RichText::new(format!(
+                            "Iurefficient Apps {} está disponible.",
+                            r.version()
+                        ))
+                        .color(pal().text),
+                    );
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                        if !busy && flat_button(ui, "×", None, vec2(30.0, 30.0)).clicked() {
+                        if let Some(super::SelfUpdate::Running(p)) = self.self_updating {
+                            ui.spinner();
+                            caps_label(
+                                ui,
+                                &format!("Actualizando… {:.0}%", p * 100.0),
+                                10.5,
+                                pal().muted,
+                            );
+                            ui.add(
+                                egui::ProgressBar::new(p)
+                                    .desired_width(160.0)
+                                    .desired_height(6.0)
+                                    .fill(pal().brand)
+                                    .corner_radius(0.0),
+                            );
+                            return;
+                        }
+                        if flat_button(ui, "×", None, vec2(30.0, 30.0)).clicked() {
                             self.update_dismissed = true;
                         }
-                        if ready {
-                            if flat_button(ui, "Reiniciar", Some(TEXT), vec2(110.0, 30.0)).clicked()
-                            {
-                                self.restart_self();
+                        let plan = self
+                            .sys
+                            .as_ref()
+                            .map(|sys| crate::selfupdate::plan(&r, sys).map(|_| ()));
+                        let failed =
+                            matches!(self.self_updating, Some(super::SelfUpdate::Failed(_)));
+                        match plan {
+                            Some(Ok(())) if !failed => {
+                                let busy = self.rows.iter().any(|r| r.busy.is_some());
+                                let b = ui
+                                    .add_enabled_ui(!busy, |ui| {
+                                        flat_button(
+                                            ui,
+                                            "Actualizar y reiniciar",
+                                            Some(pal().text),
+                                            vec2(190.0, 30.0),
+                                        )
+                                    })
+                                    .inner
+                                    .on_hover_text(
+                                        "Descarga la versión nueva, comprueba su firma, la instala \
+                                         y vuelve a abrir el lanzador",
+                                    )
+                                    .on_disabled_hover_text(
+                                        "Espera a que terminen las instalaciones en curso",
+                                    );
+                                if b.clicked() {
+                                    self.start_self_update();
+                                }
                             }
-                        } else if busy {
-                            ui.spinner();
-                        } else if flat_button(ui, "Actualizar", Some(TEXT), vec2(110.0, 30.0))
-                            .clicked()
-                        {
-                            self.start_self_update();
+                            other => {
+                                let why = match other {
+                                    Some(Err(e)) => format!(
+                                        "No puede actualizarse solo: {e}. Descárgalo desde GitHub."
+                                    ),
+                                    _ => "Descárgalo desde GitHub.".to_string(),
+                                };
+                                if flat_button(ui, "Descargar", Some(pal().text), vec2(110.0, 30.0))
+                                    .on_hover_text(why)
+                                    .clicked()
+                                {
+                                    super::open_link(&r.html_url);
+                                }
+                            }
                         }
                         if ui
                             .add(
-                                egui::Label::new(caps("Novedades ↗", 10.5, MUTED))
+                                egui::Label::new(caps("Novedades ↗", 10.5, pal().muted))
                                     .sense(Sense::click()),
                             )
                             .clicked()
@@ -357,6 +477,14 @@ impl LauncherApp {
                         }
                     });
                 });
+                if let Some(super::SelfUpdate::Failed(e)) = &self.self_updating {
+                    ui.add_space(6.0);
+                    ui.label(
+                        RichText::new(format!("No se pudo actualizar: {e}"))
+                            .size(12.5)
+                            .color(pal().error),
+                    );
+                }
             });
     }
 
@@ -410,7 +538,8 @@ impl LauncherApp {
                     .desired_width(w)
                     .margin(egui::Margin::symmetric(8, 7)),
             );
-            if !pending.is_empty() && flat_button(ui, &label, Some(WARN), vec2(0.0, 30.0)).clicked()
+            if !pending.is_empty()
+                && flat_button(ui, &label, Some(pal().warn), vec2(0.0, 30.0)).clicked()
             {
                 for i in pending {
                     self.start_install(i);
@@ -422,10 +551,10 @@ impl LauncherApp {
     fn section_title(ui: &mut Ui, n: usize, title: &str, count: usize) {
         ui.add_space(22.0);
         ui.horizontal(|ui| {
-            caps_label(ui, &format!("{n:02} / {title}"), 11.0, MUTED);
+            caps_label(ui, &format!("{n:02} / {title}"), 11.0, pal().muted);
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                 let s = if count == 1 { "app" } else { "apps" };
-                caps_label(ui, &format!("{count} {s}"), 11.0, FAINT);
+                caps_label(ui, &format!("{count} {s}"), 11.0, pal().faint);
             });
         });
         ui.add_space(10.0);
@@ -465,15 +594,15 @@ impl LauncherApp {
             let apps = items.iter().filter(|i| i.is_some()).count();
             Self::section_title(ui, n, title, apps);
             let width = ui.available_width();
-            let cols = ((width / TILE_MIN_W).floor() as usize).clamp(1, 4);
-            let tile_w = (width / cols as f32).floor();
+            let cols = ((width / CELL_W).floor() as usize).max(1);
+            let cell_w = (width / cols as f32).floor().min(CELL_W * 1.3);
             for row in items.chunks(cols) {
                 ui.horizontal(|ui| {
                     ui.spacing_mut().item_spacing = vec2(0.0, 0.0);
                     for item in row {
                         match item {
-                            Some(i) => self.tile(ui, *i, sys, tile_w),
-                            None => self.account_tile(ui, tile_w),
+                            Some(i) => self.cell(ui, *i, sys, cell_w),
+                            None => self.account_cell(ui, cell_w),
                         }
                     }
                 });
@@ -482,182 +611,231 @@ impl LauncherApp {
         if n == 0 {
             ui.add_space(40.0);
             ui.vertical_centered(|ui| {
-                ui.label(RichText::new("Ninguna app coincide con el filtro.").color(MUTED));
+                ui.label(RichText::new("Ninguna app coincide con el filtro.").color(pal().muted));
             });
         }
     }
 
-    /// Estado de la cuenta: (color, etiqueta).
-    fn account_status(&self) -> (Color32, &'static str) {
-        let a = &self.account;
-        match &a.saved {
-            _ if !a.loaded => (MUTED, "Consultando…"),
-            Some(_) if a.busy => (MUTED, "Cerrando sesión…"),
-            Some(_) if a.checking => (MUTED, "Comprobando sesión…"),
-            Some(s) if s.has_session && !a.expired => (OK, "Conectada"),
-            Some(_) => (WARN, "Sesión caducada"),
-            None => (INFO, "Sin conectar"),
+    /// Celda del mosaico: fondo al pasar el ratón, icono con su distintivo, nombre y una
+    /// línea de texto. Devuelve la respuesta (clic = abrir la ficha).
+    fn paint_cell(&self, ui: &mut Ui, w: f32, cell: Cell) -> egui::Response {
+        let Cell {
+            icon_id,
+            accent,
+            name,
+            line,
+            badge,
+            dim,
+            progress,
+        } = cell;
+        let (rect, resp) = ui.allocate_exact_size(vec2(w, CELL_H), Sense::click());
+        if !ui.is_rect_visible(rect) {
+            return resp;
         }
-    }
-
-    fn account_connected(&self) -> bool {
-        self.account.saved.as_ref().is_some_and(|s| s.has_session) && !self.account.expired
-    }
-
-    /// Mosaico de la cuenta de Iurefficient: conectar una vez para todas las apps y abrir
-    /// la instancia en el navegador.
-    fn account_tile(&mut self, ui: &mut Ui, w: f32) {
-        let accent = INFO;
-        let (rect, resp) = ui.allocate_exact_size(vec2(w, TILE_H), Sense::hover());
-        let painter = ui.painter_at(rect.expand(1.0));
-        painter.rect(
-            rect,
-            CornerRadius::ZERO,
-            Color32::from_rgb(15, 21, 34),
-            Stroke::new(1.0, LINE),
-            StrokeKind::Inside,
-        );
-        if resp.hovered() || ui.rect_contains_pointer(rect) {
-            painter.rect_filled(
-                Rect::from_min_size(rect.min, vec2(rect.width(), 2.0)),
-                0.0,
-                accent,
+        let painter = ui.painter_at(rect);
+        let hovered = resp.hovered();
+        let bg = if hovered { pal().surface_hi } else { pal().bg };
+        let card = rect.shrink(4.0);
+        if hovered {
+            painter.rect_filled(card, CornerRadius::same(10), pal().surface_hi);
+        }
+        if resp.has_focus() {
+            painter.rect_stroke(
+                card,
+                CornerRadius::same(10),
+                Stroke::new(1.5, accent),
+                StrokeKind::Inside,
             );
         }
-        let strip = Rect::from_min_size(rect.min, vec2(w, 40.0));
-        painter.hline(strip.x_range(), strip.bottom(), Stroke::new(1.0, LINE));
-        let badge = Rect::from_min_size(strip.min + vec2(PAD, 10.0), vec2(30.0, 20.0));
-        painter.rect_filled(badge, 0.0, BRAND);
-        painter.text(
-            badge.center(),
-            Align2::CENTER_CENTER,
-            "00",
-            theme::mono(11.0),
-            Color32::WHITE,
+        let icon = Rect::from_center_size(
+            pos2(rect.center().x, rect.top() + 18.0 + CELL_ICON / 2.0),
+            vec2(CELL_ICON, CELL_ICON),
         );
+        self.icons.paint(&painter, icon, icon_id, accent);
+        if dim {
+            painter.rect_filled(
+                icon.expand(1.0),
+                CornerRadius::same((CELL_ICON * 0.22) as u8),
+                bg.gamma_multiply(0.62),
+            );
+        }
+        if let Some(b) = badge {
+            paint_badge(&painter, icon.right_bottom() - vec2(4.0, 4.0), 11.0, b, bg);
+        }
+        let text_w = w - 16.0;
+        let mut name = name;
+        name.wrap = egui::text::TextWrapping::truncate_at_width(text_w);
+        let name = ui.fonts_mut(|f| f.layout_job(name));
+        let y = icon.bottom() + 12.0;
+        painter.galley(
+            pos2(rect.center().x - name.size().x / 2.0, y),
+            name,
+            pal().text,
+        );
+        let y = y + 22.0;
+        match progress {
+            Some(p) => {
+                let bar = Rect::from_center_size(pos2(rect.center().x, y + 7.0), vec2(72.0, 4.0));
+                painter.rect_filled(bar, CornerRadius::same(2), pal().line);
+                let mut done = bar;
+                done.set_width(bar.width() * p.clamp(0.0, 1.0));
+                painter.rect_filled(done, CornerRadius::same(2), accent);
+            }
+            None => {
+                let mut job = LayoutJob::simple_singleline(line.0, theme::font(12.0), line.1);
+                job.wrap = egui::text::TextWrapping::truncate_at_width(text_w);
+                let g = ui.fonts_mut(|f| f.layout_job(job));
+                painter.galley(pos2(rect.center().x - g.size().x / 2.0, y), g, line.1);
+            }
+        }
+        resp.on_hover_cursor(egui::CursorIcon::PointingHand)
+    }
 
-        let connected = self.account_connected();
-        let saved = self.account.saved.clone();
-        let mut ui = ui.new_child(
-            UiBuilder::new()
-                .max_rect(rect)
-                .layout(Layout::top_down(Align::Min)),
-        );
-        ui.scope_builder(
-            UiBuilder::new()
-                .max_rect(Rect::from_min_max(
-                    pos2(badge.right() + 8.0, strip.top()),
-                    pos2(rect.right() - PAD, strip.bottom()),
-                ))
-                .layout(Layout::right_to_left(Align::Center)),
-            |ui| {
-                let gh = "https://github.com/ellaguno/iurefficient-connect";
+    fn cell(&mut self, ui: &mut Ui, i: usize, sys: &SystemInfo, w: f32) {
+        let app: &'static AppDef = &APPS[i];
+        let accent = theme::accent(app.accent);
+        let status = self.status(i);
+        let row = &self.rows[i];
+        let progress = row.busy.as_ref().map(|_| row.progress.unwrap_or(0.0));
+        let line = if row.error.is_some() {
+            ("Error · ver detalles".to_string(), pal().error)
+        } else {
+            match &status {
+                Status::UpdateAvailable => ("Actualización".into(), pal().warn),
+                Status::NotInstalled => ("Disponible".into(), pal().info),
+                Status::Unsupported => ("No disponible".into(), pal().faint),
+                Status::Unavailable => ("Sin versión".into(), pal().faint),
+                Status::Checking => ("Consultando…".into(), pal().faint),
+                Status::UpToDate | Status::InstalledUnknown => (app.tagline.into(), pal().muted),
+            }
+        };
+        let badge = match status {
+            _ if progress.is_some() => None,
+            Status::UpToDate | Status::InstalledUnknown => Some(Badge::Ok),
+            Status::UpdateAvailable => Some(Badge::Update),
+            Status::NotInstalled => Some(Badge::Get),
+            Status::Unsupported | Status::Unavailable => Some(Badge::No),
+            Status::Checking => None,
+        };
+        let dim = matches!(status, Status::Unsupported | Status::Unavailable);
+        let cell = Cell {
+            icon_id: app.id,
+            accent,
+            name: two_tone(app.name, 14.5, accent),
+            line,
+            badge,
+            dim,
+            progress,
+        };
+        let resp = self.paint_cell(ui, w, cell);
+        let resp = resp.on_hover_text(format!("{} · {}", app.tagline, status_style(&status).1));
+        if resp.clicked() {
+            self.selected = Some(Selected::App(i));
+        }
+        resp.context_menu(|ui| {
+            ui.set_min_width(190.0);
+            if let Some((label, action)) = self.primary_action(i, sys) {
+                if ui.button(label).clicked() {
+                    self.run_action(i, action);
+                }
+            }
+            if ui.button("Ver detalles").clicked() {
+                self.selected = Some(Selected::App(i));
+            }
+            if ui.button("Novedades de la versión").clicked() {
+                super::open_link(self.notes_url(i));
+            }
+            if self.rows[i].installed.is_some() && self.rows[i].busy.is_none() {
+                ui.separator();
                 if ui
-                    .add(egui::Label::new(caps("Conector ↗", 10.5, MUTED)).sense(Sense::click()))
-                    .on_hover_text(gh)
+                    .button(RichText::new("Desinstalar…").color(pal().error))
                     .clicked()
                 {
-                    super::open_link(gh);
+                    self.confirm_uninstall = Some(i);
                 }
-                if let Some(s) = &saved {
-                    ui.add_space(10.0);
-                    if ui
-                        .add(
-                            egui::Label::new(caps("Instancia ↗", 10.5, MUTED))
-                                .sense(Sense::click()),
-                        )
-                        .on_hover_text(&s.web_url)
-                        .clicked()
-                    {
-                        super::open_link(&s.web_url);
-                    }
-                }
-            },
-        );
+            }
+        });
+    }
 
-        let top = strip.bottom() + 20.0;
-        let icon = Rect::from_min_size(pos2(rect.left() + PAD, top), vec2(60.0, 60.0));
-        self.icons.paint(&painter, icon, "iurefficient", accent);
-        let (tagline, hint) = match (&saved, connected) {
-            (Some(s), true) => (
-                format!(
-                    "Conectada como {}",
-                    self.account.name.clone().unwrap_or_else(|| s.email.clone())
-                ),
-                format!("{} · {}", s.email, s.domain),
-            ),
-            (Some(s), false) => (
-                "Vuelve a iniciar sesión".to_string(),
-                format!("{} · {}", s.email, s.domain),
-            ),
-            (None, _) => (
-                "Tu cuenta, para todas las apps".to_string(),
-                "Inicia sesión una vez desde aquí".to_string(),
-            ),
+    fn account_cell(&mut self, ui: &mut Ui, w: f32) {
+        let (color, text) = self.account_status();
+        let badge = if self.account_connected() {
+            Some(Badge::Ok)
+        } else if self.account.saved.is_some() && self.account.loaded {
+            Some(Badge::Warn)
+        } else {
+            None
         };
-        ui.scope_builder(
-            UiBuilder::new()
-                .max_rect(Rect::from_min_max(
-                    pos2(icon.right() + 14.0, top - 4.0),
-                    pos2(rect.right() - PAD, top + 70.0),
-                ))
-                .layout(Layout::top_down(Align::Min)),
-            |ui| {
-                ui.spacing_mut().item_spacing.y = 2.0;
-                ui.add_space(4.0);
-                self.icons.logo(ui, 22.0);
-                ui.add_space(2.0);
-                ui.add(egui::Label::new(RichText::new(tagline).size(14.5).color(TEXT)).truncate());
-                ui.add(egui::Label::new(RichText::new(hint).size(12.5).color(FAINT)).truncate());
-            },
-        );
+        let cell = Cell {
+            icon_id: "iurefficient",
+            accent: pal().info,
+            name: two_tone("Iurefficient", 14.5, pal().info),
+            line: (text.to_string(), color),
+            badge,
+            dim: false,
+            progress: None,
+        };
+        let resp = self.paint_cell(ui, w, cell);
+        let resp = resp.on_hover_text("Tu cuenta, para todas las apps");
+        if resp.clicked() {
+            self.selected = Some(Selected::Account);
+        }
+    }
 
-        ui.scope_builder(
-            UiBuilder::new()
-                .max_rect(Rect::from_min_max(
-                    pos2(rect.left() + PAD, top + 84.0),
-                    pos2(rect.right() - PAD, rect.bottom() - 56.0),
-                ))
-                .layout(Layout::top_down(Align::Min)),
-            |ui| {
-                ui.spacing_mut().item_spacing.y = 8.0;
-                let (color, text) = self.account_status();
-                chip(ui, text, color);
-                let line = match &saved {
-                    Some(s) if connected => {
-                        let dav = if s.has_webdav {
-                            "Sesión y WebDAV guardadas"
-                        } else {
-                            "Sesión guardada · sin WebDAV"
-                        };
-                        dav.to_string()
-                    }
-                    Some(s) if !s.app.is_empty() => format!("Cuenta configurada por {}", s.app),
-                    _ => "IureDav, IureTranscribe, IureOCR e iureditor".to_string(),
-                };
-                ui.add(egui::Label::new(RichText::new(line).size(13.0).color(MUTED)).truncate());
-                let note = match &self.account.error {
-                    Some(e) => RichText::new(e).size(12.0).color(ERROR),
-                    None => RichText::new("Las apps sin cuenta propia la toman al abrirse")
-                        .size(12.0)
-                        .color(FAINT),
-                };
-                ui.add(egui::Label::new(note).truncate());
-            },
-        );
+    /// URL de las novedades de la última versión (o de la lista de versiones).
+    pub(super) fn notes_url(&self, i: usize) -> String {
+        self.rows[i]
+            .release
+            .as_ref()
+            .and_then(|r| r.as_ref().ok())
+            .map(|r| r.html_url.clone())
+            .unwrap_or_else(|| APPS[i].release_url())
+    }
 
-        let bar = Rect::from_min_max(
-            pos2(rect.left() + PAD, rect.bottom() - 54.0),
-            pos2(rect.right() - PAD, rect.bottom() - 18.0),
-        );
-        ui.scope_builder(
-            UiBuilder::new()
-                .max_rect(bar)
-                .layout(Layout::left_to_right(Align::Center)),
-            |ui| {
-                self.account_actions(ui, bar.width());
-            },
-        );
+    /// Acción principal de la app según su estado, si hay alguna.
+    pub(super) fn primary_action(
+        &self,
+        i: usize,
+        sys: &SystemInfo,
+    ) -> Option<(&'static str, Action)> {
+        if self.rows[i].busy.is_some() {
+            return None;
+        }
+        let has_release = matches!(self.rows[i].release, Some(Ok(_))) && APPS[i].supports(sys);
+        let installed = self.rows[i].installed.is_some();
+        match self.status(i) {
+            Status::NotInstalled if has_release => Some(("Instalar", Action::Install)),
+            Status::UpdateAvailable if has_release => Some(("Actualizar", Action::Update)),
+            _ if installed && has_release && self.selection_differs(i, sys) => {
+                Some(("Cambiar a la selección", Action::Install))
+            }
+            _ if installed => Some(("Abrir", Action::Open)),
+            _ => None,
+        }
+    }
+
+    pub(super) fn run_action(&mut self, i: usize, action: Action) {
+        match action {
+            Action::Open => self.launch(i),
+            Action::Install | Action::Update => self.start_install(i),
+        }
+    }
+
+    /// Estado de la cuenta: (color, etiqueta).
+    pub(super) fn account_status(&self) -> (Color32, &'static str) {
+        let a = &self.account;
+        match &a.saved {
+            _ if !a.loaded => (pal().muted, "Consultando…"),
+            Some(_) if a.busy => (pal().muted, "Cerrando sesión…"),
+            Some(_) if a.checking => (pal().muted, "Comprobando sesión…"),
+            Some(s) if s.has_session && !a.expired => (pal().ok, "Conectada"),
+            Some(_) => (pal().warn, "Sesión caducada"),
+            None => (pal().info, "Sin conectar"),
+        }
+    }
+
+    pub(super) fn account_connected(&self) -> bool {
+        self.account.saved.as_ref().is_some_and(|s| s.has_session) && !self.account.expired
     }
 
     fn account_actions(&mut self, ui: &mut Ui, width: f32) {
@@ -666,7 +844,7 @@ impl LauncherApp {
         let saved = self.account.saved.clone();
         if self.account_connected() {
             if let Some(s) = &saved {
-                if flat_button(ui, "Abrir Iurefficient", Some(TEXT), size)
+                if flat_button(ui, "Abrir Iurefficient", Some(pal().text), size)
                     .on_hover_text(&s.web_url)
                     .clicked()
                 {
@@ -680,7 +858,7 @@ impl LauncherApp {
                 "Conectar"
             };
             let r = ui
-                .add_enabled_ui(!busy, |ui| flat_button(ui, label, Some(TEXT), size))
+                .add_enabled_ui(!busy, |ui| flat_button(ui, label, Some(pal().text), size))
                 .inner;
             if r.clicked() {
                 self.open_login();
@@ -691,7 +869,7 @@ impl LauncherApp {
             ui.spacing_mut().button_padding = vec2(0.0, 0.0);
             // Transparente en reposo, sin perder el realce al pasar el ratón y al pulsar.
             ui.visuals_mut().widgets.inactive.weak_bg_fill = Color32::TRANSPARENT;
-            let menu = egui::Button::new(RichText::new("···").size(15.0).color(TEXT))
+            let menu = egui::Button::new(RichText::new("···").size(15.0).color(pal().text))
                 .min_size(vec2(36.0, 36.0));
             egui::containers::menu::MenuButton::from_button(menu).ui(ui, |ui| {
                 ui.set_min_width(210.0);
@@ -713,7 +891,7 @@ impl LauncherApp {
                 if saved.is_some() && !busy {
                     ui.separator();
                     if ui
-                        .button(RichText::new("Cerrar sesión…").color(ERROR))
+                        .button(RichText::new("Cerrar sesión…").color(pal().error))
                         .clicked()
                     {
                         self.confirm_logout = true;
@@ -737,11 +915,11 @@ impl LauncherApp {
             ui.label(
                 RichText::new("La sesión se guarda en el llavero del sistema y la comparten IureDav, IureTranscribe, IureOCR e iureditor.")
                     .size(12.5)
-                    .color(MUTED),
+                    .color(pal().muted),
             );
             ui.add_space(12.0);
             let field = |ui: &mut Ui, label: &str, value: &mut String, hint: &str, password: bool, enabled: bool| {
-                caps_label(ui, label, 10.0, FAINT);
+                caps_label(ui, label, 10.0, pal().faint);
                 let r = ui.add_enabled(
                     enabled,
                     egui::TextEdit::singleline(value)
@@ -780,7 +958,7 @@ impl LauncherApp {
                 }
             }
             if let Some(e) = &f.error {
-                ui.label(RichText::new(e).size(12.5).color(ERROR));
+                ui.label(RichText::new(e).size(12.5).color(pal().error));
                 ui.add_space(6.0);
             }
             ui.add_space(6.0);
@@ -790,7 +968,7 @@ impl LauncherApp {
                     && !f.email.trim().is_empty()
                     && (!f.password.is_empty() || f.totp_token.is_some());
                 let label = if f.totp_token.is_some() { "Verificar" } else { "Conectar" };
-                if ui.add_enabled_ui(ready, |ui| flat_button(ui, label, Some(TEXT), vec2(130.0, 32.0))).inner.clicked() {
+                if ui.add_enabled_ui(ready, |ui| flat_button(ui, label, Some(pal().text), vec2(130.0, 32.0))).inner.clicked() {
                     submit = true;
                 }
                 if flat_button(ui, "Cancelar", None, vec2(100.0, 32.0)).clicked() {
@@ -819,11 +997,11 @@ impl LauncherApp {
             ui.add_space(6.0);
             ui.label(
                 RichText::new("Se cierra en la instancia y en este equipo. Las apps abiertas siguen conectadas hasta que las cierres; la contraseña WebDAV se conserva.")
-                    .color(MUTED),
+                    .color(pal().muted),
             );
             ui.add_space(14.0);
             ui.horizontal(|ui| {
-                if flat_button(ui, "Cerrar sesión", Some(ERROR), vec2(140.0, 32.0)).clicked() {
+                if flat_button(ui, "Cerrar sesión", Some(pal().error), vec2(140.0, 32.0)).clicked() {
                     self.logout();
                 }
                 if flat_button(ui, "Cancelar", None, vec2(100.0, 32.0)).clicked() {
@@ -836,185 +1014,19 @@ impl LauncherApp {
         }
     }
 
-    fn tile(&mut self, ui: &mut Ui, i: usize, sys: &SystemInfo, w: f32) {
-        let app: &'static AppDef = &APPS[i];
-        let accent = theme::accent(app.accent);
-        let (rect, resp) = ui.allocate_exact_size(vec2(w, TILE_H), Sense::hover());
-        let painter = ui.painter_at(rect.expand(1.0));
-        let hovered = resp.hovered() || ui.rect_contains_pointer(rect);
-        painter.rect(
-            rect,
-            CornerRadius::ZERO,
-            SURFACE,
-            Stroke::new(1.0, LINE),
-            StrokeKind::Inside,
-        );
-        if hovered {
-            painter.rect_filled(
-                Rect::from_min_size(rect.min, vec2(rect.width(), 2.0)),
-                0.0,
-                accent,
-            );
-        }
-
-        // Franja superior: número y enlaces.
-        let strip = Rect::from_min_size(rect.min, vec2(w, 40.0));
-        painter.hline(strip.x_range(), strip.bottom(), Stroke::new(1.0, LINE));
-        let badge = Rect::from_min_size(strip.min + vec2(PAD, 10.0), vec2(30.0, 20.0));
-        painter.rect_filled(badge, 0.0, accent);
-        painter.text(
-            badge.center(),
-            Align2::CENTER_CENTER,
-            format!("{:02}", i + 1),
-            theme::mono(11.0),
-            BG,
-        );
-
-        let release = self.rows[i]
-            .release
-            .as_ref()
-            .and_then(|r| r.as_ref().ok())
-            .cloned();
-        let installed = self.rows[i].installed.clone();
-        let status = self.status(i);
-
-        let mut ui = ui.new_child(
-            UiBuilder::new()
-                .max_rect(rect.shrink2(vec2(PAD, 0.0)))
-                .layout(Layout::top_down(Align::Min)),
-        );
-        // Enlaces a la derecha de la franja.
-        ui.scope_builder(
-            UiBuilder::new()
-                .max_rect(Rect::from_min_max(
-                    pos2(badge.right() + 8.0, strip.top()),
-                    pos2(rect.right() - PAD, strip.bottom()),
-                ))
-                .layout(Layout::right_to_left(Align::Center)),
-            |ui| {
-                let gh = format!("https://github.com/{}", app.repo);
-                if ui
-                    .add(egui::Label::new(caps("GitHub ↗", 10.5, MUTED)).sense(Sense::click()))
-                    .on_hover_text(&gh)
-                    .clicked()
-                {
-                    super::open_link(gh);
-                }
-                ui.add_space(10.0);
-                let notes_url = release
-                    .as_ref()
-                    .map(|r| r.html_url.clone())
-                    .unwrap_or_else(|| app.release_url());
-                let notes = release
-                    .as_ref()
-                    .and_then(|r| r.body.clone())
-                    .unwrap_or_default();
-                let link = ui
-                    .add(egui::Label::new(caps("Novedades ↗", 10.5, MUTED)).sense(Sense::click()));
-                let link = if notes.trim().is_empty() {
-                    link
-                } else {
-                    link.on_hover_text(notes.chars().take(900).collect::<String>())
-                };
-                if link.clicked() {
-                    super::open_link(notes_url);
-                }
-            },
-        );
-
-        // Icono, nombre y descripción.
-        let top = strip.bottom() + 20.0;
-        let icon = Rect::from_min_size(pos2(rect.left() + PAD, top), vec2(60.0, 60.0));
-        self.icons.paint(&painter, icon, app.id, accent);
-        ui.scope_builder(
-            UiBuilder::new()
-                .max_rect(Rect::from_min_max(
-                    pos2(icon.right() + 14.0, top - 4.0),
-                    pos2(rect.right() - PAD, top + 70.0),
-                ))
-                .layout(Layout::top_down(Align::Min)),
-            |ui| {
-                ui.spacing_mut().item_spacing.y = 2.0;
-                ui.label(two_tone(app.name, 25.0, accent))
-                    .on_hover_text(app.description);
-                ui.add(
-                    egui::Label::new(RichText::new(app.tagline).size(14.5).color(TEXT)).truncate(),
-                );
-                ui.add(
-                    egui::Label::new(RichText::new(app.hint).size(12.5).color(FAINT)).truncate(),
-                );
-            },
-        );
-
-        // Estado y versión.
-        ui.scope_builder(
-            UiBuilder::new()
-                .max_rect(Rect::from_min_max(
-                    pos2(rect.left() + PAD, top + 84.0),
-                    pos2(rect.right() - PAD, rect.bottom() - 56.0),
-                ))
-                .layout(Layout::top_down(Align::Min)),
-            |ui| {
-                ui.spacing_mut().item_spacing.y = 8.0;
-                let (color, text) = status_style(&status);
-                let text = match (&status, &release) {
-                    (Status::UpdateAvailable, Some(r)) => format!("Actualización {}", r.version()),
-                    _ => text.to_string(),
-                };
-                chip(ui, &text, color);
-                let version = match (&installed, &release) {
-                    (Some(inst), _) => {
-                        let mut s = format!(
-                            "Versión {} · {}",
-                            inst.version.as_deref().unwrap_or("?"),
-                            inst.format.label()
-                        );
-                        if let Some(v) = inst.variant.filter(|_| app.gpu_variants) {
-                            s.push_str(&format!(" · {}", v.label()));
-                        }
-                        s
-                    }
-                    (None, Some(r)) => format!("Versión {} · {}", r.version(), nice_date(r.date())),
-                    (None, None) => match &self.rows[i].release {
-                        Some(Err(_)) if status == Status::Unavailable && self.token().is_some() => {
-                            "Todavía no hay versiones en GitHub".into()
-                        }
-                        Some(Err(e)) => e.clone(),
-                        _ => "Consultando GitHub…".into(),
-                    },
-                };
-                ui.add(egui::Label::new(RichText::new(version).size(13.0).color(MUTED)).truncate());
-                self.tile_options(ui, i, sys);
-            },
-        );
-
-        // Acciones.
-        let bar = Rect::from_min_max(
-            pos2(rect.left() + PAD, rect.bottom() - 54.0),
-            pos2(rect.right() - PAD, rect.bottom() - 18.0),
-        );
-        ui.scope_builder(
-            UiBuilder::new()
-                .max_rect(bar)
-                .layout(Layout::left_to_right(Align::Center)),
-            |ui| {
-                self.tile_actions(ui, i, sys, bar.width());
-            },
-        );
-    }
-
     /// Variante (IureTranscribe), formato y avisos, en una línea fija del mosaico.
-    fn tile_options(&mut self, ui: &mut Ui, i: usize, sys: &SystemInfo) {
+    pub(super) fn tile_options(&mut self, ui: &mut Ui, i: usize, sys: &SystemInfo) {
         let app: &'static AppDef = &APPS[i];
         if let Some(e) = self.rows[i].error.clone() {
-            ui.add(egui::Label::new(RichText::new(&e).size(12.0).color(ERROR)).truncate())
+            ui.add(egui::Label::new(RichText::new(&e).size(12.0).color(pal().error)).truncate())
                 .on_hover_text(e);
             return;
         }
         let Some(Ok(release)) = self.rows[i].release.clone() else {
             if !app.note.is_empty() {
                 ui.add(
-                    egui::Label::new(RichText::new(app.note).size(12.0).color(FAINT)).truncate(),
+                    egui::Label::new(RichText::new(app.note).size(12.0).color(pal().faint))
+                        .truncate(),
                 );
             }
             return;
@@ -1022,7 +1034,8 @@ impl LauncherApp {
         if !app.supports(sys) {
             if !app.note.is_empty() {
                 ui.add(
-                    egui::Label::new(RichText::new(app.note).size(12.0).color(FAINT)).truncate(),
+                    egui::Label::new(RichText::new(app.note).size(12.0).color(pal().faint))
+                        .truncate(),
                 );
             }
             return;
@@ -1045,10 +1058,10 @@ impl LauncherApp {
         );
         let mut new_variant = variant;
         let mut new_format = None;
-        ui.with_layout(Layout::left_to_right(Align::Center), |ui| {
+        ui.horizontal(|ui| {
             if app.gpu_variants {
                 let (recommended, why) = app.recommend_variant(sys);
-                caps_label(ui, "Aceleración", 10.0, FAINT);
+                caps_label(ui, "Aceleración", 10.0, pal().faint);
                 let selected = if variant == recommended {
                     RichText::new(format!("{} · recomendada", variant.label())).size(12.5)
                 } else {
@@ -1075,7 +1088,7 @@ impl LauncherApp {
             if let Some(cur) = current {
                 if formats.len() > 1 {
                     if !app.gpu_variants {
-                        caps_label(ui, "Formato", 10.0, FAINT);
+                        caps_label(ui, "Formato", 10.0, pal().faint);
                     }
                     let mut f = cur;
                     egui::ComboBox::from_id_salt(("format", i))
@@ -1090,10 +1103,10 @@ impl LauncherApp {
                         new_format = Some(f);
                     }
                 } else if app.gpu_variants {
-                    ui.label(RichText::new(cur.label()).size(12.0).color(FAINT));
+                    ui.label(RichText::new(cur.label()).size(12.0).color(pal().faint));
                 } else if !app.note.is_empty() {
                     ui.add(
-                        egui::Label::new(RichText::new(app.note).size(12.0).color(FAINT))
+                        egui::Label::new(RichText::new(app.note).size(12.0).color(pal().faint))
                             .truncate(),
                     );
                 }
@@ -1141,7 +1154,7 @@ impl LauncherApp {
                 );
                 ui.horizontal(|ui| {
                     ui.spinner();
-                    caps_label(ui, &format!("{text} {:.0}%", p * 100.0), 10.0, MUTED);
+                    caps_label(ui, &format!("{text} {:.0}%", p * 100.0), 10.0, pal().muted);
                 });
             });
             return;
@@ -1154,22 +1167,22 @@ impl LauncherApp {
         let size = vec2(main_w, 36.0);
         match status {
             Status::NotInstalled if has_release => {
-                if flat_button(ui, "Instalar", Some(TEXT), size).clicked() {
+                if flat_button(ui, "Instalar", Some(pal().text), size).clicked() {
                     self.start_install(i);
                 }
             }
             Status::UpdateAvailable if has_release => {
-                if flat_button(ui, "Actualizar", Some(WARN), size).clicked() {
+                if flat_button(ui, "Actualizar", Some(pal().warn), size).clicked() {
                     self.start_install(i);
                 }
             }
             _ if installed && differs && has_release => {
-                if flat_button(ui, "Cambiar a la selección", Some(TEXT), size).clicked() {
+                if flat_button(ui, "Cambiar a la selección", Some(pal().text), size).clicked() {
                     self.start_install(i);
                 }
             }
             _ if installed => {
-                if flat_button(ui, "Abrir", Some(TEXT), size).clicked() {
+                if flat_button(ui, "Abrir", Some(pal().text), size).clicked() {
                     self.launch(i);
                 }
             }
@@ -1182,7 +1195,7 @@ impl LauncherApp {
             ui.spacing_mut().button_padding = vec2(0.0, 0.0);
             // Transparente en reposo, sin perder el realce al pasar el ratón y al pulsar.
             ui.visuals_mut().widgets.inactive.weak_bg_fill = Color32::TRANSPARENT;
-            let menu = egui::Button::new(RichText::new("···").size(15.0).color(TEXT))
+            let menu = egui::Button::new(RichText::new("···").size(15.0).color(pal().text))
                 .min_size(vec2(36.0, 36.0));
             egui::containers::menu::MenuButton::from_button(menu).ui(ui, |ui| {
                 ui.set_min_width(200.0);
@@ -1207,7 +1220,7 @@ impl LauncherApp {
                 if installed {
                     ui.separator();
                     if ui
-                        .button(RichText::new("Desinstalar…").color(ERROR))
+                        .button(RichText::new("Desinstalar…").color(pal().error))
                         .clicked()
                     {
                         self.confirm_uninstall = Some(i);
@@ -1221,8 +1234,8 @@ impl LauncherApp {
         ui.add_space(18.0);
         let items: Vec<usize> = (0..APPS.len()).filter(|&i| self.matches(i)).collect();
         egui::Frame::new()
-            .stroke(Stroke::new(1.0, LINE))
-            .fill(SURFACE)
+            .stroke(Stroke::new(1.0, pal().line))
+            .fill(pal().surface)
             .inner_margin(12)
             .show(ui, |ui| {
                 ui.set_width(ui.available_width());
@@ -1232,21 +1245,29 @@ impl LauncherApp {
                     .striped(false)
                     .show(ui, |ui| {
                         for h in ["", "App", "Estado", "Instalada", "Última", ""] {
-                            caps_label(ui, h, 10.0, FAINT);
+                            caps_label(ui, h, 10.0, pal().faint);
                         }
                         ui.end_row();
                         if self.account_matches() {
                             let (r, _) = ui.allocate_exact_size(vec2(32.0, 32.0), Sense::hover());
-                            self.icons.paint(ui.painter(), r, "iurefficient", INFO);
+                            self.icons
+                                .paint(ui.painter(), r, "iurefficient", pal().info);
                             ui.vertical(|ui| {
                                 ui.set_min_width(230.0);
                                 ui.spacing_mut().item_spacing.y = 0.0;
-                                self.icons.logo(ui, 14.0);
+                                let logo = self.icons.logo(ui, 14.0).interact(Sense::click());
+                                if logo
+                                    .on_hover_text("Ver detalles")
+                                    .on_hover_cursor(egui::CursorIcon::PointingHand)
+                                    .clicked()
+                                {
+                                    self.selected = Some(Selected::Account);
+                                }
                                 ui.add(
                                     egui::Label::new(
                                         RichText::new("Cuenta para todas las apps")
                                             .size(12.0)
-                                            .color(FAINT),
+                                            .color(pal().faint),
                                     )
                                     .extend(),
                                 );
@@ -1259,14 +1280,14 @@ impl LauncherApp {
                                 .as_ref()
                                 .map(|s| s.email.clone())
                                 .unwrap_or_else(|| "—".into());
-                            ui.label(RichText::new(who).color(MUTED));
+                            ui.label(RichText::new(who).color(pal().muted));
                             let dom = self
                                 .account
                                 .saved
                                 .as_ref()
                                 .map(|s| s.domain.clone())
                                 .unwrap_or_else(|| "—".into());
-                            ui.label(RichText::new(dom).color(MUTED));
+                            ui.label(RichText::new(dom).color(pal().muted));
                             ui.horizontal(|ui| self.account_actions(ui, 190.0));
                             ui.end_row();
                         }
@@ -1278,10 +1299,20 @@ impl LauncherApp {
                             ui.vertical(|ui| {
                                 ui.set_min_width(230.0);
                                 ui.spacing_mut().item_spacing.y = 0.0;
-                                ui.add(egui::Label::new(two_tone(app.name, 15.0, accent)).extend());
+                                let name = egui::Label::new(two_tone(app.name, 15.0, accent))
+                                    .extend()
+                                    .sense(Sense::click());
+                                if ui
+                                    .add(name)
+                                    .on_hover_text("Ver detalles")
+                                    .on_hover_cursor(egui::CursorIcon::PointingHand)
+                                    .clicked()
+                                {
+                                    self.selected = Some(Selected::App(i));
+                                }
                                 ui.add(
                                     egui::Label::new(
-                                        RichText::new(app.tagline).size(12.0).color(FAINT),
+                                        RichText::new(app.tagline).size(12.0).color(pal().faint),
                                     )
                                     .extend(),
                                 );
@@ -1300,13 +1331,13 @@ impl LauncherApp {
                                     )
                                 })
                                 .unwrap_or_else(|| "—".into());
-                            ui.label(RichText::new(inst).color(MUTED));
+                            ui.label(RichText::new(inst).color(pal().muted));
                             let latest = match &self.rows[i].release {
                                 Some(Ok(r)) => format!("{} · {}", r.version(), nice_date(r.date())),
                                 Some(Err(_)) => "—".into(),
                                 None => "…".into(),
                             };
-                            ui.label(RichText::new(latest).color(MUTED));
+                            ui.label(RichText::new(latest).color(pal().muted));
                             ui.horizontal(|ui| self.tile_actions(ui, i, sys, 190.0));
                             ui.end_row();
                         }
@@ -1333,11 +1364,11 @@ impl LauncherApp {
             } else {
                 ""
             };
-            caps_label(ui, &format!("{checked}{source}"), 10.0, FAINT);
+            caps_label(ui, &format!("{checked}{source}"), 10.0, pal().faint);
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                 let label = format!("Registro ({})", self.log.len());
                 if ui
-                    .add(egui::Label::new(caps(&label, 10.0, MUTED)).sense(Sense::click()))
+                    .add(egui::Label::new(caps(&label, 10.0, pal().muted)).sense(Sense::click()))
                     .clicked()
                 {
                     self.show_log = !self.show_log;
@@ -1358,7 +1389,12 @@ impl LauncherApp {
                         Os::MacOs => "macOS",
                         Os::Other => std::env::consts::OS,
                     };
-                    caps_label(ui, &format!("Instalando para {os} {arch}"), 10.0, FAINT);
+                    caps_label(
+                        ui,
+                        &format!("Instalando para {os} {arch}"),
+                        10.0,
+                        pal().faint,
+                    );
                 }
             });
         });
@@ -1378,8 +1414,8 @@ impl LauncherApp {
                     .spacing([20.0, 8.0])
                     .show(ui, |ui| {
                         let mut row = |k: &str, v: String| {
-                            caps_label(ui, k, 10.0, FAINT);
-                            ui.label(RichText::new(v).color(TEXT));
+                            caps_label(ui, k, 10.0, pal().faint);
+                            ui.label(RichText::new(v).color(pal().text));
                             ui.end_row();
                         };
                         row("Sistema", sys.platform_label());
@@ -1459,10 +1495,14 @@ impl LauncherApp {
                     .show(ui, |ui| {
                         ui.set_width(ui.available_width());
                         if self.log.is_empty() {
-                            ui.label(RichText::new("Sin actividad todavía.").color(FAINT));
+                            ui.label(RichText::new("Sin actividad todavía.").color(pal().faint));
                         }
                         for l in &self.log {
-                            ui.label(RichText::new(l).font(FontId::monospace(11.5)).color(MUTED));
+                            ui.label(
+                                RichText::new(l)
+                                    .font(FontId::monospace(11.5))
+                                    .color(pal().muted),
+                            );
                         }
                     });
             });
@@ -1482,11 +1522,11 @@ impl LauncherApp {
             ui.add_space(6.0);
             ui.label(
                 RichText::new("Se quita la app; tus documentos y ajustes no se tocan.")
-                    .color(MUTED),
+                    .color(pal().muted),
             );
             ui.add_space(14.0);
             ui.horizontal(|ui| {
-                if flat_button(ui, "Desinstalar", Some(ERROR), vec2(130.0, 32.0)).clicked() {
+                if flat_button(ui, "Desinstalar", Some(pal().error), vec2(130.0, 32.0)).clicked() {
                     self.start_uninstall(i);
                 }
                 if flat_button(ui, "Cancelar", None, vec2(100.0, 32.0)).clicked() {
@@ -1503,12 +1543,13 @@ impl LauncherApp {
 impl eframe::App for LauncherApp {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         self.handle_messages();
+        self.sync_theme();
         let ctx = ui.ctx().clone();
         // Para que «Consultado hace…» avance sin interacción.
         ctx.request_repaint_after(std::time::Duration::from_secs(30));
 
         let bar = egui::Frame::new()
-            .fill(BG)
+            .fill(pal().bg)
             .inner_margin(egui::Margin::symmetric(28, 6));
         egui::Panel::top("header")
             .frame(bar)
@@ -1517,38 +1558,56 @@ impl eframe::App for LauncherApp {
             .frame(bar)
             .show(ui, |ui| self.footer(ui));
         egui::CentralPanel::default()
-            .frame(egui::Frame::new().fill(BG).inner_margin(egui::Margin {
-                left: 28,
-                right: 28,
-                top: 0,
-                bottom: 0,
-            }))
+            .frame(
+                egui::Frame::new()
+                    .fill(pal().bg)
+                    .inner_margin(egui::Margin {
+                        left: 28,
+                        right: 28,
+                        top: 0,
+                        bottom: 0,
+                    }),
+            )
             .show(ui, |ui| {
                 // Líneas de separación de cabecera y pie, de borde a borde.
                 let full = ui.max_rect().expand2(vec2(28.0, 0.0));
                 ui.painter()
-                    .hline(full.x_range(), full.top(), Stroke::new(1.0, LINE));
+                    .hline(full.x_range(), full.top(), Stroke::new(1.0, pal().line));
                 ui.painter()
-                    .hline(full.x_range(), full.bottom(), Stroke::new(1.0, LINE));
+                    .hline(full.x_range(), full.bottom(), Stroke::new(1.0, pal().line));
+                // Cada ficha con su propio desplazamiento: se abre arriba y, al volver, el
+                // mosaico sigue donde estaba.
+                let scroll_id = match self.selected {
+                    None => "list".to_string(),
+                    Some(Selected::Account) => "detail-account".to_string(),
+                    Some(Selected::App(i)) => format!("detail-{i}"),
+                };
                 egui::ScrollArea::vertical()
+                    .id_salt(scroll_id)
                     .auto_shrink([false, false])
                     .show(ui, |ui| {
                         // Hueco para la barra de desplazamiento.
                         ui.set_max_width(ui.available_width() - 14.0);
                         self.update_banner(ui);
-                        self.filter_bar(ui);
                         match self.sys.clone() {
                             None => {
+                                self.filter_bar(ui);
                                 ui.add_space(40.0);
                                 ui.vertical_centered(|ui| {
                                     ui.spinner();
-                                    ui.label(RichText::new("Analizando el equipo…").color(MUTED));
+                                    ui.label(
+                                        RichText::new("Analizando el equipo…").color(pal().muted),
+                                    );
                                 });
                             }
-                            Some(sys) => match self.view {
-                                ViewMode::Grid => self.grid(ui, &sys),
-                                ViewMode::Table => self.table(ui, &sys),
-                            },
+                            Some(sys) if self.selected.is_some() => self.detail(ui, &sys),
+                            Some(sys) => {
+                                self.filter_bar(ui);
+                                match self.view {
+                                    ViewMode::Grid => self.grid(ui, &sys),
+                                    ViewMode::Table => self.table(ui, &sys),
+                                }
+                            }
                         }
                         ui.add_space(24.0);
                     });
@@ -1562,8 +1621,23 @@ impl eframe::App for LauncherApp {
         if self.show_log {
             self.log_window(&ctx);
         }
+        // Esc (o el botón «atrás» del ratón) cierra la ficha si no hay un diálogo encima.
+        let modal = self.viewer.is_some()
+            || self.confirm_uninstall.is_some()
+            || self.login.is_some()
+            || self.confirm_logout;
+        if self.selected.is_some()
+            && !modal
+            && ctx.input(|i| {
+                i.key_pressed(egui::Key::Escape)
+                    || i.pointer.button_pressed(egui::PointerButton::Extra1)
+            })
+        {
+            self.selected = None;
+        }
         self.uninstall_modal(&ctx);
         self.login_modal(&ctx);
         self.logout_modal(&ctx);
+        self.shot_viewer(&ctx);
     }
 }
