@@ -119,6 +119,10 @@ fn flag<'a>(args: &'a [String], name: &str) -> Option<&'a str> {
 }
 
 fn self_update() -> Result<(), String> {
+    if selfupdate::from_store() {
+        println!("iureapps se instaló desde Microsoft Store: se actualiza desde la Store.");
+        return Ok(());
+    }
     let sys = SystemInfo::detect();
     let state = State::load();
     let token = github::token(state.github_token.as_deref());

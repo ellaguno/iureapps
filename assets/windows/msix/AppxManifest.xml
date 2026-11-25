@@ -1,0 +1,68 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Paquete MSIX de Iurefficient Apps para Microsoft Store. build.yml sustituye los @…@:
+    @IDENTITY_NAME@, @PUBLISHER@, @PUBLISHER_DISPLAY_NAME@: los de Partner Center
+      (Administración de productos → Identidad del producto), en las variables del repo
+      MSIX_IDENTITY_NAME, MSIX_PUBLISHER y MSIX_PUBLISHER_DISPLAY_NAME.
+    @VERSION@: la de Cargo.toml como x.y.z.0 (la Store exige el último número en 0).
+
+  El lanzador instala otras apps: sin virtualización de archivos y registro (unvirtualizedResources)
+  lo que escriben él y los instaladores que abre (AppData, HKCU) quedaría oculto dentro del
+  paquete en vez de en su sitio real. La Store pide justificar esa capacidad al enviarlo.
+-->
+<Package
+  xmlns="http://schemas.microsoft.com/appx/manifest/foundation/windows10"
+  xmlns:uap="http://schemas.microsoft.com/appx/manifest/uap/windows10"
+  xmlns:uap3="http://schemas.microsoft.com/appx/manifest/uap/windows10/3"
+  xmlns:desktop="http://schemas.microsoft.com/appx/manifest/desktop/windows10"
+  xmlns:desktop6="http://schemas.microsoft.com/appx/manifest/desktop/windows10/6"
+  xmlns:rescap="http://schemas.microsoft.com/appx/manifest/foundation/windows10/restrictedcapabilities"
+  IgnorableNamespaces="uap uap3 desktop desktop6 rescap">
+
+  <Identity
+    Name="@IDENTITY_NAME@"
+    Publisher="@PUBLISHER@"
+    Version="@VERSION@"
+    ProcessorArchitecture="x64" />
+
+  <Properties>
+    <DisplayName>Iurefficient Apps</DisplayName>
+    <PublisherDisplayName>@PUBLISHER_DISPLAY_NAME@</PublisherDisplayName>
+    <Logo>Assets\StoreLogo.png</Logo>
+    <desktop6:FileSystemWriteVirtualization>disabled</desktop6:FileSystemWriteVirtualization>
+    <desktop6:RegistryWriteVirtualization>disabled</desktop6:RegistryWriteVirtualization>
+  </Properties>
+
+  <Dependencies>
+    <TargetDeviceFamily Name="Windows.Desktop" MinVersion="10.0.19041.0" MaxVersionTested="10.0.26100.0" />
+  </Dependencies>
+
+  <Resources>
+    <Resource Language="es-MX" />
+  </Resources>
+
+  <Applications>
+    <Application Id="IurefficientApps" Executable="iureapps.exe" EntryPoint="Windows.FullTrustApplication">
+      <uap:VisualElements
+        DisplayName="Iurefficient Apps"
+        Description="Instala, actualiza y abre las apps de escritorio de Iurefficient"
+        BackgroundColor="transparent"
+        Square150x150Logo="Assets\Square150x150Logo.png"
+        Square44x44Logo="Assets\Square44x44Logo.png" />
+      <Extensions>
+        <!-- `iureapps` en la terminal, para el modo de línea de comandos. -->
+        <uap3:Extension Category="windows.appExecutionAlias" Executable="iureapps.exe" EntryPoint="Windows.FullTrustApplication">
+          <uap3:AppExecutionAlias>
+            <desktop:ExecutionAlias Alias="iureapps.exe" />
+          </uap3:AppExecutionAlias>
+        </uap3:Extension>
+      </Extensions>
+    </Application>
+  </Applications>
+
+  <Capabilities>
+    <Capability Name="internetClient" />
+    <rescap:Capability Name="runFullTrust" />
+    <rescap:Capability Name="unvirtualizedResources" />
+  </Capabilities>
+</Package>

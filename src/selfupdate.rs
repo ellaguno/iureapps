@@ -39,6 +39,25 @@ pub enum Relaunch {
     MacApp(PathBuf),
 }
 
+/// Si corre como paquete MSIX instalado desde Microsoft Store. Entonces lo actualiza la Store
+/// (la carpeta del paquete es de sólo lectura y la Store no permite que se actualice solo).
+pub fn from_store() -> bool {
+    #[cfg(windows)]
+    {
+        #[link(name = "kernel32")]
+        extern "system" {
+            fn GetCurrentPackageFullName(length: *mut u32, name: *mut u16) -> i32;
+        }
+        const APPMODEL_ERROR_NO_PACKAGE: i32 = 15700;
+        let mut len = 0u32;
+        // Con paquete devuelve ERROR_INSUFFICIENT_BUFFER (el búfer vacío no alcanza).
+        let r = unsafe { GetCurrentPackageFullName(&mut len, std::ptr::null_mut()) };
+        r != APPMODEL_ERROR_NO_PACKAGE
+    }
+    #[cfg(not(windows))]
+    false
+}
+
 /// Cómo se instaló este ejecutable, según dónde está.
 pub fn method(sys: &SystemInfo) -> Result<Method, String> {
     let exe = std::env::current_exe().map_err(|e| e.to_string())?;
@@ -107,6 +126,9 @@ pub struct Plan {
 }
 
 pub fn plan(release: &Release, sys: &SystemInfo) -> Result<Plan, String> {
+    if from_store() {
+        return Err("instalado desde Microsoft Store, que lo actualiza".into());
+    }
     let method = method(sys)?;
     let pick = wanted(&method, sys.os, sys.arch)
         .ok_or("no hay una versión del lanzador para este equipo")?;
@@ -262,6 +284,9 @@ fn replace_binary(exe: &Path, new: &Path) -> Result<(), String> {
 
 /// Borra el ejecutable anterior que dejó una actualización en Windows.
 pub fn cleanup() {
+    if from_store() {
+        return;
+    }
     if let Ok(exe) = std::env::current_exe() {
         let _ = std::fs::remove_file(old_path(&exe));
     }

@@ -289,6 +289,10 @@ impl LauncherApp {
                 Self::send(&tx, &ctx, Msg::Release(i, r));
             });
         }
+        // La versión de Microsoft Store la actualiza la Store: no se avisa de versiones nuevas.
+        if selfupdate::from_store() {
+            return;
+        }
         let (tx, ctx) = (self.tx.clone(), self.ctx.clone());
         std::thread::spawn(move || {
             if let Ok(r) = github::latest_release(selfupdate::REPO, None) {
