@@ -152,10 +152,52 @@ jobs:
           Add-AppxPackage -Path msix\prueba\iureapps-windows-x64-prueba.msix
           $pkg = Get-AppxPackage | Where-Object { $_.Name -eq $identity -or $_.Name -eq 'Iurefficient.IurefficientApps' } | Select-Object -First 1
           Write-Output "Instalado: $($pkg.PackageFullName)"
-          $out = & "$env:LOCALAPPDATA\Microsoft\WindowsApps\iureapps.exe" --version 2>&1
-          Write-Output "iureapps --version (alias): $out"
-          Remove-AppxPackage -Package $pkg.PackageFullName
-          if ("$out" -notmatch 'iureapps') { Write-Output "::error::La CLI no respondió dentro del paquete MSIX"; exit 1 }
+          $alias = "$env:LOCALAPPDATA\Microsoft\WindowsApps\iureapps.exe"
+          $fallos = @()
+          try {
+            $out = & $alias --version 2>&1
+            Write-Output "iureapps --version (alias): $out"
+            if ("$out" -notmatch 'iureapps') { $fallos += 'La CLI no respondió dentro del paquete MSIX' }
+
+            # Sin virtualización desactivada: lo que lanza el paquete fuera del contenedor debe
+            # quedar en el HKCU y el AppData reales (esta sesión de PowerShell no está empaquetada).
+            $clave = 'HKCU:\Software\Iurefficient\PruebaMsix'
+            $cuenta = "$env:APPDATA\iurefficient\cuenta-activa.json"
+            $virtual = "$env:LOCALAPPDATA\Packages\$($pkg.PackageFamilyName)\LocalCache"
+            if (Test-Path $cuenta) { throw "Ya hay una cuenta activa en $cuenta" }
+            $out = & $alias interno-prueba-msix escribir 2>&1
+            $code = $LASTEXITCODE
+            $out | ForEach-Object { Write-Output "  $_" }
+            if ($code -ne 0) { $fallos += "interno-prueba-msix escribir terminó con $code" }
+            Start-Sleep -Seconds 3  # la escritura «Abierta» no se espera
+            $valores = Get-ItemProperty -Path $clave -ErrorAction SilentlyContinue
+            foreach ($v in 'Fuera', 'Instalador', 'Abierta') {
+              if ($valores.$v -eq 'ok') { Write-Output "HKCU real tiene PruebaMsix\$v" }
+              else { $fallos += "No quedó PruebaMsix\$v en el HKCU real" }
+            }
+            if ($valores.Dentro -eq 'ok') {
+              Write-Output "::warning::La escritura de HKCU dentro del paquete llegó al registro real (¿sin virtualización?)"
+            } else { Write-Output "Control: lo escrito dentro del paquete quedó virtualizado (no está en el HKCU real)" }
+            if (Test-Path $cuenta) {
+              $json = Get-Content $cuenta -Raw | ConvertFrom-Json
+              Write-Output "cuenta-activa.json real: $($json.domain) $($json.email) ($($json.app))"
+              if ($json.domain -ne 'prueba-msix.invalid') { $fallos += 'cuenta-activa.json real con otro dominio' }
+            } else { $fallos += "cuenta-activa.json no quedó en $cuenta" }
+            $copia = Get-ChildItem -Recurse -Path $virtual -Filter cuenta-activa.json -ErrorAction SilentlyContinue
+            if ($copia) { $fallos += "cuenta-activa.json quedó virtualizado en $($copia.FullName)" }
+
+            $out = & $alias interno-prueba-msix borrar 2>&1
+            $code = $LASTEXITCODE
+            $out | ForEach-Object { Write-Output "  $_" }
+            if ($code -ne 0) { $fallos += "interno-prueba-msix borrar terminó con $code" }
+            if (Test-Path $cuenta) { $fallos += 'cuenta-activa.json real no se borró al desconectar' }
+            else { Write-Output 'cuenta-activa.json real borrado desde el paquete' }
+          } finally {
+            Remove-Item -Path 'HKCU:\Software\Iurefficient\PruebaMsix' -Recurse -ErrorAction SilentlyContinue
+            Remove-AppxPackage -Package $pkg.PackageFullName
+          }
+          foreach ($f in $fallos) { Write-Output "::error::$f" }
+          if ($fallos.Count -gt 0) { exit 1 }
           Get-ChildItem msix\store, msix\prueba
       - name: Subir el MSIX para la Store
         if: runner.os == 'Windows'

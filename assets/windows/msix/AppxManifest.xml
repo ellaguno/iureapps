@@ -6,18 +6,18 @@
       MSIX_IDENTITY_NAME, MSIX_PUBLISHER y MSIX_PUBLISHER_DISPLAY_NAME.
     @VERSION@: la de Cargo.toml como x.y.z.0 (la Store exige el último número en 0).
 
-  El lanzador instala otras apps: sin virtualización de archivos y registro (unvirtualizedResources)
-  lo que escriben él y los instaladores que abre (AppData, HKCU) quedaría oculto dentro del
-  paquete en vez de en su sitio real. La Store pide justificar esa capacidad al enviarlo.
+  El lanzador instala otras apps. El paquete conserva la virtualización normal de AppData y
+  HKCU (sin capacidades restringidas aparte de runFullTrust): lo que debe quedar en el sistema
+  real (instaladores, desinstaladores, las apps que abre y la «cuenta activa» compartida) lo
+  lanza fuera del contenedor con PROC_THREAD_ATTRIBUTE_DESKTOP_APP_POLICY (src/breakaway.rs).
 -->
 <Package
   xmlns="http://schemas.microsoft.com/appx/manifest/foundation/windows10"
   xmlns:uap="http://schemas.microsoft.com/appx/manifest/uap/windows10"
   xmlns:uap3="http://schemas.microsoft.com/appx/manifest/uap/windows10/3"
   xmlns:desktop="http://schemas.microsoft.com/appx/manifest/desktop/windows10"
-  xmlns:desktop6="http://schemas.microsoft.com/appx/manifest/desktop/windows10/6"
   xmlns:rescap="http://schemas.microsoft.com/appx/manifest/foundation/windows10/restrictedcapabilities"
-  IgnorableNamespaces="uap uap3 desktop desktop6 rescap">
+  IgnorableNamespaces="uap uap3 desktop rescap">
 
   <Identity
     Name="@IDENTITY_NAME@"
@@ -29,8 +29,6 @@
     <DisplayName>Iurefficient Apps</DisplayName>
     <PublisherDisplayName>@PUBLISHER_DISPLAY_NAME@</PublisherDisplayName>
     <Logo>Assets\StoreLogo.png</Logo>
-    <desktop6:FileSystemWriteVirtualization>disabled</desktop6:FileSystemWriteVirtualization>
-    <desktop6:RegistryWriteVirtualization>disabled</desktop6:RegistryWriteVirtualization>
   </Properties>
 
   <Dependencies>
@@ -63,6 +61,5 @@
   <Capabilities>
     <Capability Name="internetClient" />
     <rescap:Capability Name="runFullTrust" />
-    <rescap:Capability Name="unvirtualizedResources" />
   </Capabilities>
 </Package>

@@ -140,7 +140,7 @@ pub fn login(
         };
         let json = serde_json::to_string(&sess.export()).map_err(|e| e.to_string())?;
         secrets::guardar(&acc, secrets::Kind::Session, &json).map_err(err)?;
-        account::set_active(&acc, APP_NAME).map_err(err)?;
+        set_active(&acc)?;
         // Contraseña de aplicación WebDAV para IureDav, IureTranscribe e IureOCR.
         let has_webdav = matches!(secrets::leer(&acc, secrets::Kind::WebDav), Ok(Some(s)) if !s.trim().is_empty());
         let mut created_webdav = false;
@@ -165,5 +165,55 @@ pub fn logout(saved: &Saved) -> Result<(), String> {
         }
     });
     secrets::borrar(&acc, secrets::Kind::Session).map_err(err)?;
-    account::clear_active(&acc).map_err(err)
+    clear_active(&acc)
+}
+
+// ---------------------------------------------------------------------------
+// «Cuenta activa» en el AppData real
+// ---------------------------------------------------------------------------
+//
+// `cuenta-activa.json` (en `%APPDATA%\iurefficient`) lo leen las demás apps. Empaquetado
+// (MSIX), un archivo nuevo que cree el lanzador quedaría en la copia privada del paquete y
+// nadie más lo vería; por eso lo escribe y lo borra este mismo ejecutable lanzado fuera del
+// contenedor (`iureapps interno-cuenta …`). Leerlo desde el paquete sí ve el real: Windows
+// abre el archivo real cuando el paquete no tiene copia propia, y así nunca la tiene.
+
+/// Deja `acc` como cuenta activa para todas las apps.
+pub fn set_active(acc: &Account) -> Result<(), String> {
+    if crate::breakaway::needed() {
+        return crate::breakaway::run_self(&[
+            INTERNAL,
+            "escribir",
+            &acc.host(),
+            &acc.email,
+            APP_NAME,
+        ]);
+    }
+    account::set_active(acc, APP_NAME).map_err(err)
+}
+
+/// Olvida la cuenta activa si es `acc`.
+pub fn clear_active(acc: &Account) -> Result<(), String> {
+    if crate::breakaway::needed() {
+        return crate::breakaway::run_self(&[INTERNAL, "borrar", &acc.host(), &acc.email]);
+    }
+    account::clear_active(acc).map_err(err)
+}
+
+/// Orden interna (oculta) con la que el lanzador empaquetado escribe la cuenta activa.
+pub const INTERNAL: &str = "interno-cuenta";
+
+/// `iureapps interno-cuenta escribir <dominio> <correo> <app>` o `borrar <dominio> <correo>`.
+pub fn internal(args: &[String]) -> Result<(), String> {
+    let arg = |i: usize| {
+        args.get(i).map(String::as_str).ok_or_else(|| {
+            format!("uso: iureapps {INTERNAL} escribir|borrar <dominio> <correo> [<app>]")
+        })
+    };
+    let acc = Account::new(arg(1)?, arg(2)?).map_err(err)?;
+    match arg(0)? {
+        "escribir" => account::set_active(&acc, arg(3)?).map_err(err),
+        "borrar" => account::clear_active(&acc).map_err(err),
+        other => Err(format!("{INTERNAL}: acción desconocida {other}")),
+    }
 }

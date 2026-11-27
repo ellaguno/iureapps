@@ -53,6 +53,16 @@ fn path() -> PathBuf {
 impl State {
     pub fn load() -> Self {
         std::fs::read_to_string(path())
+            .or_else(|e| {
+                // Paquete MSIX: el estado de las versiones de la Store sin virtualización
+                // (0.1.17 y 0.1.18) quedó en %LOCALAPPDATA%\iureapps.
+                let legacy = crate::util::unpackaged_data_dir().join("state.json");
+                if legacy != path() {
+                    std::fs::read_to_string(legacy)
+                } else {
+                    Err(e)
+                }
+            })
             .ok()
             .and_then(|t| serde_json::from_str(&t).ok())
             .unwrap_or_default()

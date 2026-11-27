@@ -204,10 +204,29 @@ variables del repo (*Settings → Secrets and variables → Actions → Variable
 `CN=…`) y `MSIX_PUBLISHER_DISPLAY_NAME` (`Package/Properties/PublisherDisplayName`). Sin ellas
 el paquete lleva una identidad de prueba que Partner Center rechaza.
 
-El manifiesto (`assets/windows/msix/AppxManifest.xml`) desactiva la virtualización de AppData
-y del registro (capacidad restringida `unvirtualizedResources`) para que lo que instala el
-lanzador quede en su sitio real; al enviarlo hay que justificarla. Instalado desde la Store,
-el lanzador no se actualiza solo: lo actualiza la Store.
+El manifiesto (`assets/windows/msix/AppxManifest.xml`) sólo pide `internetClient` y
+`runFullTrust` (la que hay que justificar al enviarlo) y deja la virtualización normal de los
+paquetes: lo nuevo que el lanzador crea en `AppData` y lo que escribe en `HKCU` queda en la
+copia privada del paquete. Lo que debe afectar al sistema real se lanza fuera del contenedor
+con `CreateProcessW` y `PROC_THREAD_ATTRIBUTE_DESKTOP_APP_POLICY` =
+`PROCESS_CREATION_DESKTOP_APP_BREAKAWAY_ENABLE_PROCESS_TREE` (`src/breakaway.rs`, Windows 10
+1809 o posterior), con todo su árbol de procesos:
+
+- los instaladores y desinstaladores (NSIS, Inno Setup, `msiexec`): se lanza fuera el
+  PowerShell que los abre con `Start-Process`, así que también lo que Windows eleve con UAC
+  corre fuera del paquete;
+- las apps que abre el lanzador;
+- la «cuenta activa» compartida (`%APPDATA%\iurefficient\cuenta-activa.json`): la escribe y
+  la borra el propio `iureapps.exe` lanzado fuera (orden interna `iureapps interno-cuenta`).
+  Leerla desde el paquete ve el archivo real, porque el paquete nunca tiene copia propia. Los
+  secretos van al Administrador de credenciales, que no se virtualiza.
+
+Empaquetado, los datos del lanzador (estado, descargas) van a la carpeta real del paquete,
+`%LOCALAPPDATA%\Packages\<familia>\LocalCache\Local\iureapps`, para que los instaladores
+que corren fuera encuentren lo descargado. Al probar el paquete en CI, `build.yml` comprueba con
+`iureapps interno-prueba-msix` que lo escrito por esos procesos (y la cuenta activa de prueba)
+queda en el `HKCU` y el `%APPDATA%` reales. Fuera de la Store todo se lanza como siempre.
+Instalado desde la Store, el lanzador no se actualiza solo: lo actualiza la Store.
 
 La versión del paquete es la de `Cargo.toml` con el primer número más 1 y un `.0` al final
 (`0.1.17` → `1.1.17.0`), porque la Store no acepta un primer número 0 y exige el cuarto en 0;
