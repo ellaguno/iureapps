@@ -216,10 +216,12 @@ con `CreateProcessW` y `PROC_THREAD_ATTRIBUTE_DESKTOP_APP_POLICY` =
   PowerShell que los abre con `Start-Process`, así que también lo que Windows eleve con UAC
   corre fuera del paquete;
 - las apps que abre el lanzador;
-- la «cuenta activa» compartida (`%APPDATA%\iurefficient\cuenta-activa.json`): la escribe y
-  la borra el propio `iureapps.exe` lanzado fuera (orden interna `iureapps interno-cuenta`).
-  Leerla desde el paquete ve el archivo real, porque el paquete nunca tiene copia propia. Los
-  secretos van al Administrador de credenciales, que no se virtualiza.
+- la «cuenta activa» compartida (`%APPDATA%\iurefficient\cuenta-activa.json`): el lanzador
+  la prepara en su carpeta de datos y un PowerShell lanzado fuera la copia (o la borra al
+  desconectar). No sirve relanzar el propio `iureapps.exe`: un ejecutable de la carpeta del
+  paquete vuelve a correr dentro del contenedor. Leerla desde el paquete ve el archivo real,
+  porque el paquete nunca tiene copia propia. Los secretos van al Administrador de
+  credenciales, que no se virtualiza.
 
 Empaquetado, los datos del lanzador (estado, descargas) van a la carpeta real del paquete,
 `%LOCALAPPDATA%\Packages\<familia>\LocalCache\Local\iureapps`, para que los instaladores

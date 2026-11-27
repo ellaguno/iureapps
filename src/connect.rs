@@ -174,46 +174,55 @@ pub fn logout(saved: &Saved) -> Result<(), String> {
 //
 // `cuenta-activa.json` (en `%APPDATA%\iurefficient`) lo leen las demás apps. Empaquetado
 // (MSIX), un archivo nuevo que cree el lanzador quedaría en la copia privada del paquete y
-// nadie más lo vería; por eso lo escribe y lo borra este mismo ejecutable lanzado fuera del
-// contenedor (`iureapps interno-cuenta …`). Leerlo desde el paquete sí ve el real: Windows
-// abre el archivo real cuando el paquete no tiene copia propia, y así nunca la tiene.
+// nadie más lo vería. Tampoco sirve lanzar este mismo `iureapps.exe` fuera del contenedor:
+// un ejecutable de la carpeta del paquete vuelve a correr dentro. Así que el lanzador prepara
+// el archivo en su carpeta de datos y lo copia (o lo borra) un PowerShell lanzado fuera del
+// contenedor. Leerlo desde el paquete sí ve el real: Windows abre el archivo real cuando el
+// paquete no tiene copia propia, y así nunca la tiene.
 
 /// Deja `acc` como cuenta activa para todas las apps.
 pub fn set_active(acc: &Account) -> Result<(), String> {
-    if crate::breakaway::needed() {
-        return crate::breakaway::run_self(&[
-            INTERNAL,
-            "escribir",
-            &acc.host(),
-            &acc.email,
-            APP_NAME,
-        ]);
+    if !crate::breakaway::needed() {
+        return account::set_active(acc, APP_NAME).map_err(err);
     }
-    account::set_active(acc, APP_NAME).map_err(err)
+    let dest = active_path().ok_or("no hay carpeta de configuración")?;
+    let updated_at = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    let a = ActiveAccount {
+        domain: acc.host(),
+        email: acc.email.clone(),
+        app: APP_NAME.to_string(),
+        updated_at,
+    };
+    let json = serde_json::to_string_pretty(&a).map_err(|e| e.to_string())?;
+    let tmp = crate::util::data_dir()
+        .join("tmp")
+        .join("cuenta-activa.json");
+    if let Some(dir) = tmp.parent() {
+        std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
+    }
+    std::fs::write(&tmp, json).map_err(|e| format!("{}: {e}", tmp.display()))?;
+    let copied = crate::breakaway::copy_file(&tmp, &dest);
+    let _ = std::fs::remove_file(&tmp);
+    copied
 }
 
 /// Olvida la cuenta activa si es `acc`.
 pub fn clear_active(acc: &Account) -> Result<(), String> {
-    if crate::breakaway::needed() {
-        return crate::breakaway::run_self(&[INTERNAL, "borrar", &acc.host(), &acc.email]);
+    if !crate::breakaway::needed() {
+        return account::clear_active(acc).map_err(err);
     }
-    account::clear_active(acc).map_err(err)
+    match (account::active(), active_path()) {
+        (Some(a), Some(path)) if a.domain == acc.host() && a.email == acc.email => {
+            crate::breakaway::remove_file(&path)
+        }
+        _ => Ok(()),
+    }
 }
 
-/// Orden interna (oculta) con la que el lanzador empaquetado escribe la cuenta activa.
-pub const INTERNAL: &str = "interno-cuenta";
-
-/// `iureapps interno-cuenta escribir <dominio> <correo> <app>` o `borrar <dominio> <correo>`.
-pub fn internal(args: &[String]) -> Result<(), String> {
-    let arg = |i: usize| {
-        args.get(i).map(String::as_str).ok_or_else(|| {
-            format!("uso: iureapps {INTERNAL} escribir|borrar <dominio> <correo> [<app>]")
-        })
-    };
-    let acc = Account::new(arg(1)?, arg(2)?).map_err(err)?;
-    match arg(0)? {
-        "escribir" => account::set_active(&acc, arg(3)?).map_err(err),
-        "borrar" => account::clear_active(&acc).map_err(err),
-        other => Err(format!("{INTERNAL}: acción desconocida {other}")),
-    }
+/// `%APPDATA%\iurefficient\cuenta-activa.json` (la misma ruta que usa `iurefficient-connect`).
+fn active_path() -> Option<std::path::PathBuf> {
+    account::shared_config_dir().map(|d| d.join("cuenta-activa.json"))
 }

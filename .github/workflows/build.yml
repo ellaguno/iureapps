@@ -176,8 +176,8 @@ jobs:
               else { $fallos += "No quedó PruebaMsix\$v en el HKCU real" }
             }
             if ($valores.Dentro -eq 'ok') {
-              Write-Output "::warning::La escritura de HKCU dentro del paquete llegó al registro real (¿sin virtualización?)"
-            } else { Write-Output "Control: lo escrito dentro del paquete quedó virtualizado (no está en el HKCU real)" }
+              Write-Output "Nota: en este Windows lo que el paquete escribe en HKCU desde dentro también llega al registro real"
+            } else { Write-Output "Control: lo escrito en HKCU dentro del paquete quedó virtualizado" }
             if (Test-Path $cuenta) {
               $json = Get-Content $cuenta -Raw | ConvertFrom-Json
               Write-Output "cuenta-activa.json real: $($json.domain) $($json.email) ($($json.app))"

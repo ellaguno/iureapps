@@ -54,11 +54,40 @@ pub fn spawn(program: &Path, args: &[&str]) -> Result<(), String> {
     }
 }
 
-/// Ejecuta una orden interna de este mismo `iureapps.exe` fuera del contenedor y espera a que
-/// termine. Lanzado por su ruta (no por el alias), el ejecutable corre sin identidad de paquete.
-pub fn run_self(args: &[&str]) -> Result<(), String> {
-    let exe = std::env::current_exe().map_err(|e| e.to_string())?;
-    run(&exe.to_string_lossy(), args)
+// Un ejecutable de la carpeta del paquete (este mismo `iureapps.exe`) vuelve a correr dentro
+// del contenedor aunque se lance así; para tocar archivos reales se usa PowerShell.
+
+fn ps_quote(p: &Path) -> String {
+    format!("'{}'", p.to_string_lossy().replace('\'', "''"))
+}
+
+/// Copia `src` a `dest` (creando su carpeta) desde fuera del contenedor, para que `dest` quede
+/// en el `AppData` real y no en la copia privada del paquete.
+pub fn copy_file(src: &Path, dest: &Path) -> Result<(), String> {
+    let dir = dest.parent().ok_or("ruta sin carpeta")?;
+    let script = format!(
+        "$ErrorActionPreference = 'Stop'; New-Item -ItemType Directory -Force -Path {} | Out-Null; \
+         Copy-Item -LiteralPath {} -Destination {} -Force",
+        ps_quote(dir),
+        ps_quote(src),
+        ps_quote(dest)
+    );
+    run(
+        "powershell",
+        &["-NoProfile", "-NonInteractive", "-Command", &script],
+    )
+}
+
+/// Borra `path` (si existe) desde fuera del contenedor.
+pub fn remove_file(path: &Path) -> Result<(), String> {
+    let p = ps_quote(path);
+    let script = format!(
+        "$ErrorActionPreference = 'Stop'; if (Test-Path -LiteralPath {p}) {{ Remove-Item -LiteralPath {p} -Force }}"
+    );
+    run(
+        "powershell",
+        &["-NoProfile", "-NonInteractive", "-Command", &script],
+    )
 }
 
 /// Carpeta de datos del lanzador cuando corre empaquetado:

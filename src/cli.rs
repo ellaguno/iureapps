@@ -48,8 +48,7 @@ pub fn run(args: &[String]) -> i32 {
         "desconectar" | "logout" => logout(),
         "iurefficient" | "web" => open_web(),
         "actualizar-lanzador" | "self-update" => self_update(),
-        // Órdenes internas, fuera de la ayuda.
-        connect::INTERNAL => connect::internal(&args[1..]),
+        // Prueba de CI, fuera de la ayuda.
         "interno-prueba-msix" => msix_test(&args[1..]),
         other => Err(format!("orden desconocida: {other}\n\n{HELP}")),
     };
