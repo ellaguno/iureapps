@@ -236,6 +236,13 @@ fn mac_bundle_key(app: &Path, key: &str) -> Option<String> {
 
 /// Abre la app sin esperar a que termine.
 pub fn launch(installed: &Installed, sys: &SystemInfo) -> Result<(), String> {
+    // Empaquetado (MSIX), la app se abre fuera del contenedor: si no, heredaría la
+    // virtualización del lanzador y no vería sus propios datos ni la cuenta compartida.
+    if let Launch::Exec(p) = &installed.launch {
+        if crate::breakaway::needed() {
+            return crate::breakaway::spawn(p, &[]).map_err(|e| format!("no se pudo abrir: {e}"));
+        }
+    }
     let mut cmd = match &installed.launch {
         Launch::Exec(p) => command(&p.to_string_lossy()),
         Launch::AppImage(p) => {
@@ -654,15 +661,17 @@ pub(crate) fn install_rpm(file: &Path) -> Result<(), String> {
     }
 }
 
-/// Start-Process pide elevación (UAC) cuando el instalador la necesita.
-fn ps_run_wait(exe: &str, args: &str) -> Result<(), String> {
+/// Start-Process pide elevación (UAC) cuando el instalador la necesita. Empaquetado (MSIX),
+/// PowerShell se lanza fuera del contenedor y con él el instalador, elevado o no: lo que
+/// escriba (AppData, HKCU, Program Files) queda en el sistema real.
+pub(crate) fn ps_run_wait(exe: &str, args: &str) -> Result<(), String> {
     let exe = exe.replace('\'', "''");
     let script = if args.is_empty() {
         format!("$p = Start-Process -FilePath '{exe}' -Wait -PassThru; exit $p.ExitCode")
     } else {
         format!("$p = Start-Process -FilePath '{exe}' -ArgumentList '{args}' -Wait -PassThru; exit $p.ExitCode")
     };
-    run("powershell", &["-NoProfile", "-Command", &script])
+    crate::breakaway::run("powershell", &["-NoProfile", "-Command", &script])
 }
 
 /// Parámetros de Inno Setup para instalar o desinstalar sin preguntas (NSIS usa `/S`).

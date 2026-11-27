@@ -1,6 +1,7 @@
 //! iureapps: lanzador e instalador ligero de las apps de escritorio de Iurefficient.
 #![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
 
+mod breakaway;
 mod catalog;
 mod cli;
 mod connect;

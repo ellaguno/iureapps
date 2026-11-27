@@ -48,6 +48,8 @@ pub fn run(args: &[String]) -> i32 {
         "desconectar" | "logout" => logout(),
         "iurefficient" | "web" => open_web(),
         "actualizar-lanzador" | "self-update" => self_update(),
+        // Prueba de CI, fuera de la ayuda.
+        "interno-prueba-msix" => msix_test(&args[1..]),
         other => Err(format!("orden desconocida: {other}\n\n{HELP}")),
     };
     match result {
@@ -351,4 +353,75 @@ fn logout() -> Result<(), String> {
 fn open_web() -> Result<(), String> {
     let s = connect::saved().ok_or("no hay cuenta conectada (usa `iureapps conectar`)")?;
     crate::util::open_url(&s.web_url)
+}
+
+/// Prueba del paquete MSIX en CI (orden oculta; ver el paso «Paquete MSIX» de build.yml).
+/// `escribir`: desde el paquete, deja en el HKCU y el AppData reales lo que escriben los
+/// procesos lanzados fuera del contenedor, y una cuenta activa de prueba; `borrar` la quita.
+/// No pisa una cuenta activa de verdad.
+fn msix_test(args: &[String]) -> Result<(), String> {
+    use crate::breakaway;
+    use iurefficient_connect::{account, Account};
+    const KEY: &str = r"HKCU\Software\Iurefficient\PruebaMsix";
+    const DOMAIN: &str = "prueba-msix.invalid";
+    let acc = Account::new(DOMAIN, "ci@prueba-msix.invalid").map_err(|e| e.to_string())?;
+    if !breakaway::needed() {
+        return Err("esta prueba sólo tiene sentido dentro del paquete MSIX".into());
+    }
+    let reg_add = |name: &'static str| ["add", KEY, "/v", name, "/d", "ok", "/f"];
+    match args.first().map(String::as_str) {
+        Some("escribir") => {
+            if account::active().is_some_and(|a| a.domain != DOMAIN) {
+                return Err("ya hay una cuenta activa en este equipo; la prueba no la pisa".into());
+            }
+            let data = crate::util::data_dir();
+            println!("Datos del lanzador: {}", data.display());
+            breakaway::run("reg", &reg_add("Fuera"))?;
+            println!("reg add fuera del contenedor: hecho");
+            installer::ps_run_wait("reg.exe", &format!("add {KEY} /v Instalador /d ok /f"))?;
+            println!("reg add como un instalador (PowerShell Start-Process): hecho");
+            breakaway::spawn(std::path::Path::new("reg.exe"), &reg_add("Abierta"))?;
+            println!("reg add abierto como una app (sin esperar): lanzado");
+            // Control: dentro del paquete la escritura queda virtualizada.
+            crate::util::run("reg", &reg_add("Dentro"))?;
+            println!("reg add dentro del paquete: hecho");
+            // Lo descargado en la carpeta de datos lo ve un proceso fuera del contenedor.
+            let probe = data.join("tmp").join("prueba-msix.txt");
+            std::fs::create_dir_all(probe.parent().unwrap()).map_err(|e| e.to_string())?;
+            std::fs::write(&probe, "ok").map_err(|e| e.to_string())?;
+            let seen = breakaway::run("cmd", &["/c", "type", &probe.to_string_lossy()]);
+            let _ = std::fs::remove_file(&probe);
+            seen.map_err(|e| {
+                format!(
+                    "un proceso fuera del contenedor no ve {}: {e}",
+                    probe.display()
+                )
+            })?;
+            println!("descarga visible fuera del contenedor: {}", probe.display());
+            connect::set_active(&acc)?;
+            match account::active() {
+                Some(a) if a.domain == DOMAIN => {
+                    println!(
+                        "cuenta activa de prueba escrita y leída desde el paquete: {}",
+                        a.email
+                    )
+                }
+                other => {
+                    return Err(format!(
+                        "el paquete no lee la cuenta activa escrita: {other:?}"
+                    ))
+                }
+            }
+            Ok(())
+        }
+        Some("borrar") => {
+            connect::clear_active(&acc)?;
+            if account::active().is_some_and(|a| a.domain == DOMAIN) {
+                return Err("la cuenta activa de prueba sigue ahí".into());
+            }
+            println!("cuenta activa de prueba borrada");
+            Ok(())
+        }
+        _ => Err("uso: iureapps interno-prueba-msix escribir|borrar".into()),
+    }
 }

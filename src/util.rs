@@ -3,8 +3,18 @@
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
 
-/// Directorio de datos del lanzador (estado, AppImages, descargas).
+/// Directorio de datos del lanzador (estado, AppImages, descargas). Empaquetado (MSIX), la
+/// carpeta privada real del paquete: ver [`crate::breakaway::package_data_dir`].
 pub fn data_dir() -> PathBuf {
+    if let Some(dir) = crate::breakaway::package_data_dir() {
+        return dir;
+    }
+    unpackaged_data_dir()
+}
+
+/// `%LOCALAPPDATA%\iureapps` en Windows (donde también lo dejaban las versiones 0.1.17 y
+/// 0.1.18 de la Store, sin virtualización).
+pub fn unpackaged_data_dir() -> PathBuf {
     let base = if cfg!(windows) {
         std::env::var_os("LOCALAPPDATA").map(PathBuf::from)
     } else if cfg!(target_os = "macos") {
