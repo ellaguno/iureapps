@@ -12,7 +12,6 @@
 //! Se leen de `raw.githubusercontent.com` (no gastan consultas de la API) y se guardan en
 //! `<datos>/shots/<app>/` para verlas sin conexión.
 
-use crate::catalog::AppDef;
 use crate::github;
 use std::path::PathBuf;
 
@@ -30,8 +29,8 @@ pub struct Shot {
     pub png: Vec<u8>,
 }
 
-fn cache_dir(app: &AppDef) -> PathBuf {
-    crate::util::data_dir().join("shots").join(app.id)
+fn cache_dir(id: &str) -> PathBuf {
+    crate::util::data_dir().join("shots").join(id)
 }
 
 fn raw_url(repo: &str, file: &str) -> String {
@@ -43,22 +42,22 @@ fn parse_captions(text: &str) -> Vec<String> {
     text.lines().map(|l| l.trim().to_string()).collect()
 }
 
-/// Capturas de `app`: de GitHub si hay conexión (y se actualiza la caché) o de la caché.
-/// Lista vacía si la app no publica ninguna.
-pub fn load(app: &AppDef, token: Option<&str>) -> Result<Vec<Shot>, String> {
-    match fetch(app, token) {
+/// Capturas de la app `id` (repo `repo`): de GitHub si hay conexión (y se actualiza la
+/// caché) o de la caché. Lista vacía si la app no publica ninguna.
+pub fn load(id: &str, repo: &str, token: Option<&str>) -> Result<Vec<Shot>, String> {
+    match fetch(repo, token) {
         Ok(shots) => {
-            save_cache(app, &shots);
+            save_cache(id, &shots);
             Ok(shots)
         }
-        Err(e) => read_cache(app).ok_or(e),
+        Err(e) => read_cache(id).ok_or(e),
     }
 }
 
-fn fetch(app: &AppDef, token: Option<&str>) -> Result<Vec<Shot>, String> {
+fn fetch(repo: &str, token: Option<&str>) -> Result<Vec<Shot>, String> {
     let mut pngs = Vec::new();
     for n in 1..=MAX_SHOTS {
-        match github::fetch_bytes(&raw_url(app.repo, &format!("{n}.png")), token, MAX_PNG)? {
+        match github::fetch_bytes(&raw_url(repo, &format!("{n}.png")), token, MAX_PNG)? {
             Some(png) => pngs.push(png),
             None => break,
         }
@@ -66,7 +65,7 @@ fn fetch(app: &AppDef, token: Option<&str>) -> Result<Vec<Shot>, String> {
     if pngs.is_empty() {
         return Ok(Vec::new());
     }
-    let captions = github::fetch_bytes(&raw_url(app.repo, CAPTIONS), token, MAX_CAPTIONS)
+    let captions = github::fetch_bytes(&raw_url(repo, CAPTIONS), token, MAX_CAPTIONS)
         .ok()
         .flatten()
         .map(|b| parse_captions(&String::from_utf8_lossy(&b)))
@@ -81,8 +80,8 @@ fn fetch(app: &AppDef, token: Option<&str>) -> Result<Vec<Shot>, String> {
         .collect())
 }
 
-fn save_cache(app: &AppDef, shots: &[Shot]) {
-    let dir = cache_dir(app);
+fn save_cache(id: &str, shots: &[Shot]) {
+    let dir = cache_dir(id);
     let _ = std::fs::remove_dir_all(&dir);
     if shots.is_empty() || std::fs::create_dir_all(&dir).is_err() {
         return;
@@ -94,8 +93,8 @@ fn save_cache(app: &AppDef, shots: &[Shot]) {
     let _ = std::fs::write(dir.join(CAPTIONS), captions.join("\n"));
 }
 
-fn read_cache(app: &AppDef) -> Option<Vec<Shot>> {
-    let dir = cache_dir(app);
+fn read_cache(id: &str) -> Option<Vec<Shot>> {
+    let dir = cache_dir(id);
     let captions = std::fs::read_to_string(dir.join(CAPTIONS))
         .map(|t| parse_captions(&t))
         .unwrap_or_default();

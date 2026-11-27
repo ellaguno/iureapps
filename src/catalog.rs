@@ -178,6 +178,136 @@ pub static APPS: &[AppDef] = &[
     },
 ];
 
+/// Apps de Iurefficient para teléfono y tableta (mosaico de la cuenta). `None`: todavía no
+/// está publicada y se muestra como «Próximamente».
+/// iPhone y iPad, por ahora en beta pública con TestFlight (aún no en la App Store).
+pub const MOBILE_IOS: Option<&str> = Some("https://testflight.apple.com/join/ZrE87s45");
+pub const MOBILE_ANDROID: Option<&str> = None;
+
+/// Una forma de instalar una de las [`EXTRAS`].
+pub struct Way {
+    pub label: &'static str,
+    /// Sistema donde es la forma recomendada (acción principal del mosaico).
+    pub os: Option<Os>,
+    pub action: WayAction,
+}
+
+pub enum WayAction {
+    /// Asset de la última release cuyo nombre termina así (si aún no se consultó, la página
+    /// de la release).
+    Asset(&'static str),
+    /// Comando que se copia al portapapeles.
+    Command(&'static str),
+    Url(&'static str),
+}
+
+/// Otras apps de uso de Iurefficient que el lanzador no instala: van en la carpeta del
+/// mosaico, con su ficha y sus formas de instalarlas.
+pub struct ExtraDef {
+    pub id: &'static str,
+    pub name: &'static str,
+    pub repo: &'static str,
+    pub description: &'static str,
+    pub tagline: &'static str,
+    pub hint: &'static str,
+    pub accent: [u8; 3],
+    /// Dónde corre, para la etiqueta del mosaico.
+    pub platforms: &'static str,
+    /// Qué es (etiqueta de estado del mosaico).
+    pub kind: &'static str,
+    pub ways: &'static [Way],
+}
+
+pub static EXTRAS: &[ExtraDef] = &[
+    ExtraDef {
+        id: "iureapps",
+        name: "iureApps",
+        repo: "ellaguno/iureapps",
+        description: "Este lanzador: instala, actualiza y abre las apps de escritorio de Iurefficient.",
+        tagline: "Lanzador de la suite",
+        hint: "Compártelo para instalar todas las apps",
+        accent: [6, 80, 236],
+        platforms: "Linux · Windows · macOS",
+        kind: "Esta app",
+        ways: &[
+            Way {
+                label: "Descargar .deb (Debian, Ubuntu)",
+                os: Some(Os::Linux),
+                action: WayAction::Asset("_amd64.deb"),
+            },
+            Way {
+                label: "Descargar .rpm (Fedora, openSUSE)",
+                os: None,
+                action: WayAction::Asset(".x86_64.rpm"),
+            },
+            Way {
+                label: "Descargar binario Linux (.tar.gz)",
+                os: None,
+                action: WayAction::Asset("-linux-x64.tar.gz"),
+            },
+            Way {
+                label: "Descargar instalador de Windows",
+                os: Some(Os::Windows),
+                action: WayAction::Asset("-windows-x64.exe"),
+            },
+            Way {
+                label: "Descargar .dmg de macOS",
+                os: Some(Os::MacOs),
+                action: WayAction::Asset("-macos-universal.dmg"),
+            },
+            Way {
+                label: "Copiar la liga de descarga",
+                os: None,
+                action: WayAction::Command("https://github.com/ellaguno/iureapps/releases/latest"),
+            },
+        ],
+    },
+    ExtraDef {
+        id: "iureti",
+        name: "iureTI",
+        repo: "ellaguno/iureTI",
+        description: "Sonda que descubre PCs, servidores, switches, impresoras y access points de la red y los manda al inventario de Iurefficient.",
+        tagline: "Sensor de inventario",
+        hint: "Descubre los equipos de la red",
+        accent: [14, 165, 233],
+        platforms: "Linux · Raspberry Pi · Docker",
+        kind: "Servicio para Linux",
+        ways: &[
+            Way {
+                label: "Copiar comando de instalación (Linux)",
+                os: Some(Os::Linux),
+                action: WayAction::Command(
+                    "curl -fsSL https://github.com/ellaguno/iureTI/releases/latest/download/install.sh | sudo sh",
+                ),
+            },
+            Way {
+                label: "Copiar comando de Docker",
+                os: None,
+                action: WayAction::Command(
+                    "docker run -d --name iureti --network host --restart unless-stopped -v iureti-data:/data ghcr.io/ellaguno/iureti:latest",
+                ),
+            },
+            Way {
+                label: "Descargar .deb amd64",
+                os: None,
+                action: WayAction::Asset("_amd64.deb"),
+            },
+            Way {
+                label: "Descargar .deb arm64 (Raspberry Pi)",
+                os: None,
+                action: WayAction::Asset("_arm64.deb"),
+            },
+            Way {
+                label: "Instrucciones de instalación",
+                os: None,
+                action: WayAction::Url(
+                    "https://github.com/ellaguno/iureTI/blob/main/README.es.md#instalar-una-sonda-servicio",
+                ),
+            },
+        ],
+    },
+];
+
 pub fn find(id: &str) -> Option<&'static AppDef> {
     APPS.iter().find(|a| a.id.eq_ignore_ascii_case(id))
 }
@@ -259,6 +389,24 @@ impl Format {
             "app" => Some(Format::MacApp),
             "tar.gz" | "targz" | "tar" => Some(Format::TarGz),
             _ => None,
+        }
+    }
+}
+
+impl ExtraDef {
+    pub fn release_url(&self) -> String {
+        format!("https://github.com/{}/releases/latest", self.repo)
+    }
+
+    /// Forma recomendada en este equipo: la de su sistema (en Linux con RPM, el `.rpm`).
+    pub fn primary_way(&self, sys: &SystemInfo) -> Option<&Way> {
+        let rpm = self
+            .ways
+            .iter()
+            .find(|w| matches!(w.action, WayAction::Asset(s) if s.ends_with(".rpm")));
+        match rpm {
+            Some(w) if sys.os == Os::Linux && sys.pkg == PkgFamily::Rpm => Some(w),
+            _ => self.ways.iter().find(|w| w.os == Some(sys.os)),
         }
     }
 }

@@ -1,0 +1,3 @@
+Las apps de la suite, con su estado de un vistazo
+Ficha de cada app: instalar, actualizar o abrir, aceleración y capturas
+Carpeta «Más apps»: otras apps de Iurefficient y cómo instalarlas

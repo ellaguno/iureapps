@@ -1,12 +1,13 @@
 //! Interfaz gráfica (egui): mosaico de apps con su icono, estado y acciones.
 
 mod detail;
+mod extras;
 mod markdown;
 mod system_theme;
 mod theme;
 mod view;
 
-use crate::catalog::{AppDef, APPS};
+use crate::catalog::{AppDef, APPS, EXTRAS};
 use crate::connect;
 use crate::github::{self, Release};
 use crate::installer::{self, Installed};
@@ -23,7 +24,8 @@ enum Msg {
     System(Box<SystemInfo>),
     Detected(usize, Option<Installed>),
     Release(usize, Result<Release, String>),
-    SelfRelease(Release),
+    /// Última release de una de las apps de la carpeta (`EXTRAS`), entre ellas el lanzador.
+    ExtraRelease(usize, Result<Release, String>),
     Progress(usize, f32),
     Log(String),
     Done(usize, Result<Option<Managed>, String>),
@@ -31,7 +33,11 @@ enum Msg {
     AccountVerified(Result<String, String>),
     LoginDone(Result<connect::LoginOutcome, String>),
     LogoutDone(Result<(), String>),
-    Shots(usize, Result<Vec<(String, egui::ColorImage)>, String>),
+    /// Capturas de la app con ese id (de `APPS` o de `EXTRAS`).
+    Shots(
+        &'static str,
+        Result<Vec<(String, egui::ColorImage)>, String>,
+    ),
     /// Otra instancia pidió que esta ventana se muestre.
     Wake,
     SelfProgress(f32),
@@ -97,6 +103,9 @@ enum Filter {
 enum Selected {
     Account,
     App(usize),
+    /// La carpeta «Más apps», con las apps de `EXTRAS`.
+    Folder,
+    Extra(usize),
 }
 
 /// Capturas de la ficha de una app.
@@ -137,9 +146,14 @@ pub struct LauncherApp {
     login: Option<LoginForm>,
     confirm_logout: bool,
     selected: Option<Selected>,
-    shots: HashMap<usize, Shots>,
-    /// Captura ampliada: (app, índice).
-    viewer: Option<(usize, usize)>,
+    /// Capturas por id de app.
+    shots: HashMap<&'static str, Shots>,
+    /// Captura ampliada: (id de la app, índice).
+    viewer: Option<(&'static str, usize)>,
+    /// Releases de las apps de la carpeta, en el orden de `EXTRAS`.
+    extras: Vec<Option<Result<Release, String>>>,
+    /// Qué se copió al portapapeles y cuándo (para confirmarlo en el botón).
+    copied: Option<(String, Instant)>,
     self_updating: Option<SelfUpdate>,
 }
 
@@ -185,6 +199,15 @@ fn open_link(url: impl AsRef<str>) {
             }
         }
     });
+}
+
+/// Nombre de la app con ese id, de la suite o de la carpeta.
+fn app_name(id: &str) -> &'static str {
+    APPS.iter()
+        .map(|a| (a.id, a.name))
+        .chain(EXTRAS.iter().map(|e| (e.id, e.name)))
+        .find(|(i, _)| *i == id)
+        .map_or("", |(_, n)| n)
 }
 
 /// Tamaño inicial; `IUREAPPS_WINDOW_SIZE=1280x900` lo cambia (útil para capturas).
@@ -235,6 +258,8 @@ impl LauncherApp {
             selected: None,
             shots: HashMap::new(),
             viewer: None,
+            extras: EXTRAS.iter().map(|_| None).collect(),
+            copied: None,
             self_updating: None,
         };
         let (tx, ctx2) = (app.tx.clone(), app.ctx.clone());
@@ -289,16 +314,15 @@ impl LauncherApp {
                 Self::send(&tx, &ctx, Msg::Release(i, r));
             });
         }
-        // La versión de Microsoft Store la actualiza la Store: no se avisa de versiones nuevas.
-        if selfupdate::from_store() {
-            return;
+        // Las de la carpeta, entre ellas el propio lanzador (aviso de versión nueva).
+        for (k, extra) in EXTRAS.iter().enumerate() {
+            self.extras[k] = None;
+            let (tx, ctx) = (self.tx.clone(), self.ctx.clone());
+            std::thread::spawn(move || {
+                let r = github::latest_release(extra.repo, None);
+                Self::send(&tx, &ctx, Msg::ExtraRelease(k, r));
+            });
         }
-        let (tx, ctx) = (self.tx.clone(), self.ctx.clone());
-        std::thread::spawn(move || {
-            if let Ok(r) = github::latest_release(selfupdate::REPO, None) {
-                Self::send(&tx, &ctx, Msg::SelfRelease(r));
-            }
-        });
     }
 
     fn handle_messages(&mut self) {
@@ -318,10 +342,21 @@ impl LauncherApp {
                         self.last_checked = Some(Instant::now());
                     }
                 }
-                Msg::SelfRelease(r) => {
-                    if version_cmp(r.version(), env!("CARGO_PKG_VERSION")).is_gt() {
-                        self.self_update = Some(r);
+                Msg::ExtraRelease(k, r) => {
+                    match &r {
+                        // La versión de Microsoft Store la actualiza la Store: no se avisa.
+                        Ok(rel)
+                            if EXTRAS[k].repo == selfupdate::REPO
+                                && !selfupdate::from_store()
+                                && version_cmp(rel.version(), env!("CARGO_PKG_VERSION"))
+                                    .is_gt() =>
+                        {
+                            self.self_update = Some(rel.clone());
+                        }
+                        Ok(_) => {}
+                        Err(e) => self.log.push(format!("{}: {e}", EXTRAS[k].name)),
                     }
+                    self.extras[k] = Some(r);
                 }
                 Msg::Progress(i, p) => self.rows[i].progress = Some(p),
                 Msg::Log(m) => self.log.push(m),
@@ -364,14 +399,14 @@ impl LauncherApp {
                 }
                 Msg::SelfProgress(p) => self.self_updating = Some(SelfUpdate::Running(p)),
                 Msg::SelfDone(r) => self.self_update_done(r),
-                Msg::Shots(i, r) => {
+                Msg::Shots(id, r) => {
                     let shots = match r {
                         Ok(images) => Shots::Ready(
                             images
                                 .into_iter()
                                 .enumerate()
                                 .map(|(k, (caption, img))| {
-                                    let name = format!("shot-{}-{k}", APPS[i].id);
+                                    let name = format!("shot-{id}-{k}");
                                     let tex = self.ctx.load_texture(
                                         name,
                                         img,
@@ -382,11 +417,11 @@ impl LauncherApp {
                                 .collect(),
                         ),
                         Err(e) => {
-                            self.log.push(format!("{}: capturas: {e}", APPS[i].name));
+                            self.log.push(format!("{}: capturas: {e}", app_name(id)));
                             Shots::Failed(e)
                         }
                     };
-                    self.shots.insert(i, shots);
+                    self.shots.insert(id, shots);
                 }
                 Msg::LogoutDone(r) => {
                     self.account.busy = false;
@@ -561,21 +596,22 @@ impl LauncherApp {
         }
     }
 
-    /// Descarga (o lee de la caché) las capturas de la app `i`, una vez por sesión.
-    fn load_shots(&mut self, i: usize) {
-        if self.shots.contains_key(&i) {
+    /// Descarga (o lee de la caché) las capturas de la app `id` (repo `repo`), una vez por
+    /// sesión.
+    fn load_shots(&mut self, id: &'static str, repo: &'static str) {
+        if self.shots.contains_key(id) {
             return;
         }
-        self.shots.insert(i, Shots::Loading);
+        self.shots.insert(id, Shots::Loading);
         let (tx, ctx, token) = (self.tx.clone(), self.ctx.clone(), self.token());
         std::thread::spawn(move || {
-            let r = crate::shots::load(&APPS[i], token.as_deref()).map(|shots| {
+            let r = crate::shots::load(id, repo, token.as_deref()).map(|shots| {
                 shots
                     .into_iter()
                     .filter_map(|s| Some((s.caption, theme::decode_shot(&s.png)?)))
                     .collect()
             });
-            Self::send(&tx, &ctx, Msg::Shots(i, r));
+            Self::send(&tx, &ctx, Msg::Shots(id, r));
         });
     }
 

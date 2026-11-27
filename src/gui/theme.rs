@@ -233,7 +233,7 @@ const SHARP_DOWNSCALE: TextureOptions = TextureOptions {
 
 impl Icons {
     pub fn load(ctx: &egui::Context) -> Self {
-        let files: [(&'static str, &'static [u8]); 6] = [
+        let files: [(&'static str, &'static [u8]); 7] = [
             (
                 "iureditor",
                 include_bytes!("../../assets/icons/iureditor.png"),
@@ -248,6 +248,7 @@ impl Icons {
                 "iuredesk",
                 include_bytes!("../../assets/icons/iuredesk.png"),
             ),
+            ("iureapps", include_bytes!("../../assets/iureapps.png")),
             (
                 "iurefficient",
                 include_bytes!(concat!(env!("OUT_DIR"), "/icono.png")),
@@ -387,6 +388,18 @@ pub fn paint_drawn_icon(painter: &Painter, rect: Rect, app_id: &str, accent: Col
                 let color = if k == 2 { accent } else { white };
                 painter.rect_filled(bar, CornerRadius::same((w / 2.0) as u8), color);
             }
+        }
+        "iureti" => {
+            // Red: un nodo central (la sonda) unido a cuatro equipos.
+            let hub = pos2(rect.center().x, base + s * 0.17);
+            let r_node = s * 0.055;
+            let nodes = [(-0.24, -0.10), (0.24, -0.10), (-0.24, 0.16), (0.24, 0.16)];
+            for (dx, dy) in nodes {
+                let p = pos2(hub.x + s * dx, hub.y + s * dy);
+                painter.line_segment([hub, p], Stroke::new(s * 0.025, white));
+                painter.circle_filled(p, r_node, white);
+            }
+            painter.circle_filled(hub, r_node * 1.5, accent);
         }
         _ => {
             // Diagrama de Gantt: tres barras escalonadas.

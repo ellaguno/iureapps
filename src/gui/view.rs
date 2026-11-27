@@ -10,7 +10,7 @@ use eframe::egui::{
     RichText, Sense, Stroke, StrokeKind, TextFormat, Ui,
 };
 
-const CELL_W: f32 = 136.0;
+pub(super) const CELL_W: f32 = 136.0;
 const CELL_H: f32 = 156.0;
 const CELL_ICON: f32 = 72.0;
 
@@ -30,17 +30,30 @@ pub(super) enum Badge {
 }
 
 /// Lo que pinta una celda del mosaico.
-struct Cell {
-    icon_id: &'static str,
-    accent: Color32,
-    name: LayoutJob,
+pub(super) struct Cell {
+    /// Id del icono; [`FOLDER`] dibuja la carpeta con los iconos de su contenido.
+    pub icon_id: &'static str,
+    pub accent: Color32,
+    pub name: LayoutJob,
     /// Texto bajo el nombre y su color (estado o para qué sirve la app).
-    line: (String, Color32),
-    badge: Option<Badge>,
+    pub line: (String, Color32),
+    pub badge: Option<Badge>,
     /// Icono atenuado: no se puede instalar.
-    dim: bool,
+    pub dim: bool,
     /// Barra de avance en lugar del texto, mientras instala.
-    progress: Option<f32>,
+    pub progress: Option<f32>,
+}
+
+/// Id de icono de la carpeta «Más apps».
+pub(super) const FOLDER: &str = "carpeta";
+
+/// Un elemento del mosaico.
+#[derive(Clone, Copy)]
+enum Item {
+    Account,
+    App(usize),
+    /// La carpeta con las otras apps de Iurefficient (`EXTRAS`).
+    Folder,
 }
 
 /// Acción principal de una app.
@@ -560,17 +573,21 @@ impl LauncherApp {
         ui.add_space(10.0);
     }
 
-    /// Mosaicos por sección; `None` es el de la cuenta de Iurefficient.
-    fn sections(&self) -> Vec<(&'static str, Vec<Option<usize>>)> {
+    /// Mosaicos por sección: la cuenta de Iurefficient al principio de la suite y la carpeta
+    /// «Más apps» al final.
+    fn sections(&self) -> Vec<(&'static str, Vec<Item>)> {
         let pick = |exp: bool| {
             (0..APPS.len())
                 .filter(|&i| APPS[i].experimental == exp && self.matches(i))
-                .map(Some)
+                .map(Item::App)
                 .collect::<Vec<_>>()
         };
         let mut suite = pick(false);
         if self.account_matches() {
-            suite.insert(0, None);
+            suite.insert(0, Item::Account);
+        }
+        if self.folder_matches() {
+            suite.push(Item::Folder);
         }
         vec![("Apps de la suite", suite), ("En exploración", pick(true))]
     }
@@ -579,9 +596,17 @@ impl LauncherApp {
         let q = self.search.trim().to_lowercase();
         self.filter == Filter::All
             && (q.is_empty()
-                || ["iurefficient", "cuenta", "instancia", "sesión"]
-                    .iter()
-                    .any(|t| t.contains(&q)))
+                || [
+                    "iurefficient",
+                    "cuenta",
+                    "instancia",
+                    "sesión",
+                    "móvil",
+                    "iphone",
+                    "android",
+                ]
+                .iter()
+                .any(|t| t.contains(&q)))
     }
 
     fn grid(&mut self, ui: &mut Ui, sys: &SystemInfo) {
@@ -591,7 +616,7 @@ impl LauncherApp {
                 continue;
             }
             n += 1;
-            let apps = items.iter().filter(|i| i.is_some()).count();
+            let apps = items.iter().filter(|i| matches!(i, Item::App(_))).count();
             Self::section_title(ui, n, title, apps);
             let width = ui.available_width();
             let cols = ((width / CELL_W).floor() as usize).max(1);
@@ -600,9 +625,10 @@ impl LauncherApp {
                 ui.horizontal(|ui| {
                     ui.spacing_mut().item_spacing = vec2(0.0, 0.0);
                     for item in row {
-                        match item {
-                            Some(i) => self.cell(ui, *i, sys, cell_w),
-                            None => self.account_cell(ui, cell_w),
+                        match *item {
+                            Item::App(i) => self.cell(ui, i, sys, cell_w),
+                            Item::Account => self.account_cell(ui, cell_w),
+                            Item::Folder => self.folder_cell(ui, cell_w),
                         }
                     }
                 });
@@ -618,7 +644,7 @@ impl LauncherApp {
 
     /// Celda del mosaico: fondo al pasar el ratón, icono con su distintivo, nombre y una
     /// línea de texto. Devuelve la respuesta (clic = abrir la ficha).
-    fn paint_cell(&self, ui: &mut Ui, w: f32, cell: Cell) -> egui::Response {
+    pub(super) fn paint_cell(&self, ui: &mut Ui, w: f32, cell: Cell) -> egui::Response {
         let Cell {
             icon_id,
             accent,
@@ -651,7 +677,11 @@ impl LauncherApp {
             pos2(rect.center().x, rect.top() + 18.0 + CELL_ICON / 2.0),
             vec2(CELL_ICON, CELL_ICON),
         );
-        self.icons.paint(&painter, icon, icon_id, accent);
+        if icon_id == FOLDER {
+            self.paint_folder(&painter, icon);
+        } else {
+            self.icons.paint(&painter, icon, icon_id, accent);
+        }
         if dim {
             painter.rect_filled(
                 icon.expand(1.0),
@@ -1341,6 +1371,7 @@ impl LauncherApp {
                             ui.horizontal(|ui| self.tile_actions(ui, i, sys, 190.0));
                             ui.end_row();
                         }
+                        self.extra_rows(ui, sys);
                     });
             });
     }
@@ -1581,6 +1612,8 @@ impl eframe::App for LauncherApp {
                     None => "list".to_string(),
                     Some(Selected::Account) => "detail-account".to_string(),
                     Some(Selected::App(i)) => format!("detail-{i}"),
+                    Some(Selected::Folder) => "folder".to_string(),
+                    Some(Selected::Extra(k)) => format!("extra-{k}"),
                 };
                 egui::ScrollArea::vertical()
                     .id_salt(scroll_id)
@@ -1633,7 +1666,11 @@ impl eframe::App for LauncherApp {
                     || i.pointer.button_pressed(egui::PointerButton::Extra1)
             })
         {
-            self.selected = None;
+            // De la ficha de una app de la carpeta se vuelve a la carpeta.
+            self.selected = match self.selected {
+                Some(Selected::Extra(_)) => Some(Selected::Folder),
+                _ => None,
+            };
         }
         self.uninstall_modal(&ctx);
         self.login_modal(&ctx);

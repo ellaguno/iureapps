@@ -33,7 +33,13 @@ Qué hace:
   la sesión en el llavero del sistema, crea la contraseña de aplicación WebDAV de este
   equipo si no hay ninguna y deja la cuenta como «cuenta activa». IureDav, IureTranscribe,
   IureOCR e iureditor la toman al abrirse si no tienen otra configurada. «Abrir
-  Iurefficient» abre la instancia en el navegador.
+  Iurefficient» abre la instancia en el navegador. La ficha de la cuenta enlaza también la app
+  móvil (iPhone y iPad por TestFlight; Android, próximamente).
+- **Carpeta «Más apps»**: otras apps de Iurefficient que el lanzador no instala (el propio
+  lanzador e [iureTI](https://github.com/ellaguno/iureTI), el sensor de inventario). Cada
+  una tiene su ficha, con capturas, versión y sus formas de instalarla: descargas por
+  sistema, o comandos de instalación y de Docker que se copian al portapapeles. Se agregan
+  en `EXTRAS` de `src/catalog.rs`; las ligas móviles, en `MOBILE_IOS` y `MOBILE_ANDROID`.
 - **Se actualiza solo**: cuando hay una versión nueva del lanzador, «Actualizar y reiniciar»
   baja el archivo que corresponde a cómo está instalado (`.deb`/`.rpm` con `pkexec`, el
   ejecutable suelto, el `.exe` de Windows o el `.dmg` de macOS), comprueba su firma, se

@@ -21,7 +21,7 @@ const SHOT_H: f32 = 230.0;
 /// Estilo de los botones de la ficha; el color dice qué hace, igual que el distintivo
 /// del mosaico.
 #[derive(Clone, Copy)]
-enum Kind {
+pub(super) enum Kind {
     Open,
     Install,
     Update,
@@ -29,7 +29,7 @@ enum Kind {
     Plain,
 }
 
-fn button(ui: &mut Ui, text: &str, kind: Kind) -> egui::Response {
+pub(super) fn button(ui: &mut Ui, text: &str, kind: Kind) -> egui::Response {
     let (fill, fg, stroke) = match kind {
         Kind::Open => (pal().ok, pal().bg, Stroke::NONE),
         Kind::Install => (pal().info, pal().bg, Stroke::NONE),
@@ -60,7 +60,7 @@ fn button(ui: &mut Ui, text: &str, kind: Kind) -> egui::Response {
     )
 }
 
-fn link(ui: &mut Ui, text: &str, url: &str) {
+pub(super) fn link(ui: &mut Ui, text: &str, url: &str) {
     if ui
         .add(egui::Label::new(caps(text, 10.5, pal().muted)).sense(Sense::click()))
         .on_hover_text(url)
@@ -84,7 +84,7 @@ fn gradient(painter: &egui::Painter, rect: Rect, a: Color32, b: Color32) {
 }
 
 /// Dato de la ficha: etiqueta pequeña y valor.
-fn fact(ui: &mut Ui, label: &str, value: &str, color: Color32) {
+pub(super) fn fact(ui: &mut Ui, label: &str, value: &str, color: Color32) {
     ui.allocate_ui_with_layout(
         vec2(190.0, 44.0),
         egui::Layout::top_down(egui::Align::Min),
@@ -98,27 +98,29 @@ fn fact(ui: &mut Ui, label: &str, value: &str, color: Color32) {
     );
 }
 
-fn section(ui: &mut Ui, title: &str) {
+pub(super) fn section(ui: &mut Ui, title: &str) {
     ui.add_space(26.0);
     caps_label(ui, title, 11.0, pal().muted);
     ui.add_space(10.0);
 }
 
 impl LauncherApp {
-    /// Ficha de lo seleccionado, con «‹ Todas las apps» para volver al mosaico.
+    /// Ficha de lo seleccionado, con «‹ Todas las apps» para volver al mosaico (o
+    /// «‹ Más apps» a la carpeta, desde una de sus apps).
     pub(super) fn detail(&mut self, ui: &mut Ui, sys: &SystemInfo) {
         let Some(sel) = self.selected else { return };
         ui.add_space(16.0);
+        let (back, to) = match sel {
+            Selected::Extra(_) => ("‹  Más apps", Some(Selected::Folder)),
+            _ => ("‹  Todas las apps", None),
+        };
         if ui
-            .add(
-                egui::Label::new(caps("‹  Todas las apps", 11.0, pal().muted))
-                    .sense(Sense::click()),
-            )
+            .add(egui::Label::new(caps(back, 11.0, pal().muted)).sense(Sense::click()))
             .on_hover_text("Esc")
             .on_hover_cursor(egui::CursorIcon::PointingHand)
             .clicked()
         {
-            self.selected = None;
+            self.selected = to;
             return;
         }
         ui.add_space(12.0);
@@ -126,12 +128,20 @@ impl LauncherApp {
         match sel {
             Selected::Account => self.account_detail(ui),
             Selected::App(i) => self.app_detail(ui, i, sys),
+            Selected::Folder => self.folder_view(ui, sys),
+            Selected::Extra(k) => self.extra_detail(ui, k, sys),
         }
     }
 
     /// Portada a todo lo ancho con el icono montado sobre su borde inferior, y a la derecha
     /// del icono lo que pinte `title`.
-    fn hero(&self, ui: &mut Ui, icon_id: &str, accent: Color32, title: impl FnOnce(&mut Ui)) {
+    pub(super) fn hero(
+        &self,
+        ui: &mut Ui,
+        icon_id: &str,
+        accent: Color32,
+        title: impl FnOnce(&mut Ui),
+    ) {
         let w = ui.available_width();
         let (rect, _) = ui.allocate_exact_size(vec2(w, HERO_H), Sense::hover());
         let painter = ui.painter_at(rect);
@@ -214,7 +224,7 @@ impl LauncherApp {
         }
 
         section(ui, "Capturas");
-        self.shots_strip(ui, i);
+        self.shots_strip(ui, app.id, app.repo);
 
         section(ui, "Detalles");
         self.app_facts(ui, i, sys);
@@ -362,13 +372,13 @@ impl LauncherApp {
     }
 
     /// Capturas en fila (con desplazamiento horizontal); un clic las amplía.
-    fn shots_strip(&mut self, ui: &mut Ui, i: usize) {
-        self.load_shots(i);
+    pub(super) fn shots_strip(&mut self, ui: &mut Ui, id: &'static str, repo: &'static str) {
+        self.load_shots(id, repo);
         let mut open = None;
-        match self.shots.get(&i) {
+        match self.shots.get(id) {
             Some(Shots::Ready(v)) if !v.is_empty() => {
                 egui::ScrollArea::horizontal()
-                    .id_salt(("shots", i))
+                    .id_salt(("shots", id))
                     .show(ui, |ui| {
                         ui.horizontal(|ui| {
                             ui.spacing_mut().item_spacing.x = 14.0;
@@ -422,7 +432,7 @@ impl LauncherApp {
                 .on_hover_text(format!(
                     "Se toman de {}/1.png, 2.png… en github.com/{}",
                     crate::shots::DIR,
-                    APPS[i].repo
+                    repo
                 ));
             }
             Some(Shots::Failed(e)) => {
@@ -444,14 +454,14 @@ impl LauncherApp {
             }
         }
         if let Some(k) = open {
-            self.viewer = Some((i, k));
+            self.viewer = Some((id, k));
         }
     }
 
     /// Captura ampliada, con flechas para pasar a la anterior o la siguiente.
     pub(super) fn shot_viewer(&mut self, ctx: &egui::Context) {
-        let Some((i, k)) = self.viewer else { return };
-        let Some(Shots::Ready(v)) = self.shots.get(&i) else {
+        let Some((id, k)) = self.viewer else { return };
+        let Some(Shots::Ready(v)) = self.shots.get(id) else {
             self.viewer = None;
             return;
         };
@@ -473,7 +483,7 @@ impl LauncherApp {
             ui.horizontal(|ui| {
                 ui.set_width(size.x);
                 let label = if caption.is_empty() {
-                    format!("{} · {} de {n}", APPS[i].name, k + 1)
+                    format!("{} · {} de {n}", super::app_name(id), k + 1)
                 } else {
                     format!("{caption} · {} de {n}", k + 1)
                 };
@@ -505,7 +515,7 @@ impl LauncherApp {
             self.viewer = None;
         } else if go != 0 && n > 0 {
             let k = (k as i32 + go).rem_euclid(n as i32) as usize;
-            self.viewer = Some((i, k));
+            self.viewer = Some((id, k));
         }
     }
 
@@ -580,6 +590,8 @@ impl LauncherApp {
             ui.add_space(6.0);
             ui.label(RichText::new(e).size(13.0).color(pal().error));
         }
+
+        self.mobile_section(ui);
 
         section(ui, "Detalles");
         ui.horizontal_wrapped(|ui| {
